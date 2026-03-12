@@ -291,7 +291,7 @@ function gas(options = {}) {
             formats: ["iife"],
             name: "globalThis"
           },
-          rollupOptions: {
+          rolldownOptions: {
             output: {
               entryFileNames: "Server.js",
               extend: true,
@@ -367,9 +367,9 @@ function gas(options = {}) {
           minify: resolvedConfig.define?.PRODUCTION ?? false,
           outDir: distDir,
           write: false,
-          rollupOptions: {
+          rolldownOptions: {
             ...clientRolldownOptions,
-            output: { format: "es" },
+            output: { format: "esm" },
             input: resolve(root, clientEntry)
           }
         },

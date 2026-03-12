@@ -208,7 +208,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
             formats: ["iife" as const],
             name: "globalThis",
           },
-          rollupOptions: {
+          rolldownOptions: {
             output: {
               entryFileNames: "Server.js",
               extend: true,
@@ -305,7 +305,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
           minify: resolvedConfig.define?.PRODUCTION ?? false,
           outDir: distDir,
           write: false,
-          rollupOptions: {
+          rolldownOptions: {
             ...clientRolldownOptions,
             output: { format: "esm" },
             input: resolve(root, clientEntry),

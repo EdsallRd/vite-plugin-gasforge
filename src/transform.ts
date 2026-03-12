@@ -213,8 +213,6 @@ function stripHandlerProperty(objectStr: string): string {
  * in the rest of the code (outside of import statements).
  */
 function stripUnusedImports(code: string): string {
-  // const importPattern =
-  //   /^import\s+(?:type\s+)?(?:\{([^}]+)\}|(\w+)).*?from\s+["'][^"']+["'];?\s*$/gm;
   const lines = code.split("\n");
 
   // Collect all non-import code for usage checking
