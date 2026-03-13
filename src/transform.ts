@@ -1,5 +1,5 @@
 /**
- * Code transforms for vite-plugin-gas.
+ * Code transforms for vite-plugin-gasforge.
  *
  * Client transform: strips `handler` from createServerFn calls, injects `__name`,
  * and removes imports that become unused after handler removal.

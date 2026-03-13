@@ -1,5 +1,5 @@
 // Client-side google.script API types for Google Apps Script HTML Service.
-// Add to your tsconfig: "types": ["vite-plugin-gas/google.script"]
+// Add to your tsconfig: "types": ["vite-plugin-gasforge/google.script"]
 // See: https://developers.google.com/apps-script/guides/html/reference/run
 
 declare namespace google {

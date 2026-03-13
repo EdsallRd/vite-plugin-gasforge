@@ -16,7 +16,7 @@ type ServerFn<TInput extends StandardSchemaV1, TOutput extends StandardSchemaV1>
  *
  * @example
  * ```ts
- * import { createServerFn } from "vite-plugin-gas";
+ * import { createServerFn } from "vite-plugin-gasforge";
  * import { z } from "zod";
  *
  * const getGreeting = createServerFn({
@@ -39,7 +39,7 @@ interface GASPluginOptions {
     client?: {
         entry?: string;
         plugins?: PluginOption[];
-        rolldownOptions?: BuildOptions["rolldownOptions"];
+        rollupOptions?: BuildOptions["rollupOptions"];
     };
 }
 declare function gas(options?: GASPluginOptions): Plugin;

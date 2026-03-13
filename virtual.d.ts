@@ -1,4 +1,4 @@
-// Type declarations for virtual modules provided by vite-plugin-gas.
+// Type declarations for virtual modules provided by vite-plugin-gasforge.
 
 /// <reference path="google.script.d.ts" />
 

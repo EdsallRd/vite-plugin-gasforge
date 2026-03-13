@@ -42,7 +42,7 @@ export type ServerFn<
  *
  * @example
  * ```ts
- * import { createServerFn } from "vite-plugin-gas";
+ * import { createServerFn } from "vite-plugin-gasforge";
  * import { z } from "zod";
  *
  * const getGreeting = createServerFn({
@@ -137,7 +137,7 @@ function buildRegistry(srcDir: string): FnEntry[] {
     for (const name of names) {
       if (seen.has(name)) {
         throw new Error(
-          `vite-plugin-gas: duplicate server function "${name}" in:\n` +
+          `vite-plugin-gasforge: duplicate server function "${name}" in:\n` +
             `  ${seen.get(name)}\n  ${filePath}`,
         );
       }
@@ -156,7 +156,7 @@ export interface GASPluginOptions {
   client?: {
     entry?: string;
     plugins?: PluginOption[];
-    rolldownOptions?: BuildOptions["rolldownOptions"];
+    rollupOptions?: BuildOptions["rollupOptions"];
   };
 }
 
@@ -174,14 +174,14 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
   const serverEntry = options.server ?? "src/server/index.ts";
   const clientEntry = options.client?.entry ?? "src/client/index.html";
   const clientPlugins = options.client?.plugins ?? [];
-  const clientRolldownOptions = options.client?.rolldownOptions ?? {};
+  const clientRollupOptions = options.client?.rollupOptions ?? {};
 
   let resolvedConfig: ResolvedConfig;
   let root: string;
   let registry: FnEntry[] = [];
 
   return {
-    name: "vite-plugin-gas",
+    name: "vite-plugin-gasforge",
     enforce: "pre",
 
     configResolved(config) {
@@ -193,7 +193,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
 
       if (registry.length > 0) {
         console.log(
-          `vite-plugin-gas: ${registry.length} server function(s) — ${registry.map((f) => f.name).join(", ")}`,
+          `vite-plugin-gasforge: ${registry.length} server function(s) — ${registry.map((f) => f.name).join(", ")}`,
         );
       }
     },
@@ -208,7 +208,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
             formats: ["iife" as const],
             name: "globalThis",
           },
-          rolldownOptions: {
+          rollupOptions: {
             output: {
               entryFileNames: "Server.js",
               extend: true,
@@ -228,8 +228,9 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       if (source === VIRTUAL_SERVER_FNS) return "\0" + VIRTUAL_SERVER_FNS;
       if (source === VIRTUAL_SERVER_RUNTIME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
-      // Redirect "vite-plugin-gas" imports in source files to lightweight server runtime
-      if (source === "vite-plugin-gas") return "\0" + VIRTUAL_SERVER_RUNTIME;
+      // Redirect plugin imports in source files to lightweight server runtime
+      if (source === "vite-plugin-gasforge")
+        return "\0" + VIRTUAL_SERVER_RUNTIME;
       // ?gas-server modules: no \0 prefix so TS/JSX transforms still run
       if (source.endsWith("?gas-server")) return source;
       return null;
@@ -278,7 +279,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
         const code = readFileSync(id, "utf-8");
         if (code.includes("createServerFn")) {
           console.log(
-            "vite-plugin-gas: server function changed, re-scanning...",
+            "vite-plugin-gasforge: server function changed, re-scanning...",
           );
           registry = buildRegistry(resolve(root, "src"));
         }
@@ -287,7 +288,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
 
     // Client build
     async closeBundle() {
-      console.log("vite-plugin-gas: building client bundle...");
+      console.log("vite-plugin-gasforge: building client bundle...");
 
       const clientDir = resolve(root, dirname(clientEntry));
       const distDir = resolvedConfig.build.outDir
@@ -305,8 +306,8 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
           minify: resolvedConfig.define?.PRODUCTION ?? false,
           outDir: distDir,
           write: false,
-          rolldownOptions: {
-            ...clientRolldownOptions,
+          rollupOptions: {
+            ...clientRollupOptions,
             output: { format: "esm" },
             input: resolve(root, clientEntry),
           },
@@ -318,12 +319,24 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       });
 
       const buildOutput = await build(clientConfig);
-      await writeFile(
-        resolve(distDir, "Client.html"),
-        // @ts-expect-error - output is an array of RollupOutput
-        buildOutput.output[0].source,
-        "utf-8",
+      // Find the HTML asset in the build output
+      // @ts-expect-error - output is an array of RollupOutput
+      const outputs = buildOutput.output as Array<{
+        type: string;
+        fileName: string;
+        source?: string;
+        code?: string;
+      }>;
+      const html = outputs.find(
+        (o) => o.type === "asset" && o.fileName.endsWith(".html"),
       );
+      if (html?.source) {
+        await writeFile(resolve(distDir, "Client.html"), html.source, "utf-8");
+      } else {
+        throw new Error(
+          "vite-plugin-gasforge: no HTML asset found in client build output",
+        );
+      }
     },
   };
 }
@@ -332,11 +345,15 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
 
 function gasClientPlugin(): Plugin {
   return {
-    name: "vite-plugin-gas:client",
+    name: "vite-plugin-gasforge:client",
     enforce: "pre",
 
     resolveId(source) {
-      if (source === "vite-plugin-gas") return VIRTUAL_CLIENT_RUNTIME;
+      if (
+        source === "vite-plugin-gasforge" ||
+        source === "vite-plugin-gasforge"
+      )
+        return VIRTUAL_CLIENT_RUNTIME;
       if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
       return null;
     },

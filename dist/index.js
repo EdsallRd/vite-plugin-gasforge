@@ -241,7 +241,7 @@ function buildRegistry(srcDir) {
     for (const name of names) {
       if (seen.has(name)) {
         throw new Error(
-          `vite-plugin-gas: duplicate server function "${name}" in:
+          `vite-plugin-gasforge: duplicate server function "${name}" in:
   ${seen.get(name)}
   ${filePath}`
         );
@@ -264,12 +264,12 @@ function gas(options = {}) {
   const serverEntry = options.server ?? "src/server/index.ts";
   const clientEntry = options.client?.entry ?? "src/client/index.html";
   const clientPlugins = options.client?.plugins ?? [];
-  const clientRolldownOptions = options.client?.rolldownOptions ?? {};
+  const clientRollupOptions = options.client?.rollupOptions ?? {};
   let resolvedConfig;
   let root;
   let registry = [];
   return {
-    name: "vite-plugin-gas",
+    name: "vite-plugin-gasforge",
     enforce: "pre",
     configResolved(config) {
       resolvedConfig = config;
@@ -277,7 +277,7 @@ function gas(options = {}) {
       registry = buildRegistry(resolve(root, "src"));
       if (registry.length > 0) {
         console.log(
-          `vite-plugin-gas: ${registry.length} server function(s) \u2014 ${registry.map((f) => f.name).join(", ")}`
+          `vite-plugin-gasforge: ${registry.length} server function(s) \u2014 ${registry.map((f) => f.name).join(", ")}`
         );
       }
     },
@@ -291,7 +291,7 @@ function gas(options = {}) {
             formats: ["iife"],
             name: "globalThis"
           },
-          rolldownOptions: {
+          rollupOptions: {
             output: {
               entryFileNames: "Server.js",
               extend: true,
@@ -308,7 +308,8 @@ function gas(options = {}) {
       if (source === VIRTUAL_SERVER_FNS) return "\0" + VIRTUAL_SERVER_FNS;
       if (source === VIRTUAL_SERVER_RUNTIME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
-      if (source === "vite-plugin-gas") return "\0" + VIRTUAL_SERVER_RUNTIME;
+      if (source === "vite-plugin-gasforge")
+        return "\0" + VIRTUAL_SERVER_RUNTIME;
       if (source.endsWith("?gas-server")) return source;
       return null;
     },
@@ -345,7 +346,7 @@ function gas(options = {}) {
         const code = readFileSync(id, "utf-8");
         if (code.includes("createServerFn")) {
           console.log(
-            "vite-plugin-gas: server function changed, re-scanning..."
+            "vite-plugin-gasforge: server function changed, re-scanning..."
           );
           registry = buildRegistry(resolve(root, "src"));
         }
@@ -353,7 +354,7 @@ function gas(options = {}) {
     },
     // Client build
     async closeBundle() {
-      console.log("vite-plugin-gas: building client bundle...");
+      console.log("vite-plugin-gasforge: building client bundle...");
       const clientDir = resolve(root, dirname(clientEntry));
       const distDir = resolvedConfig.build.outDir ? resolve(root, resolvedConfig.build.outDir) : resolve(root, "dist");
       const clientConfig = defineConfig({
@@ -367,8 +368,8 @@ function gas(options = {}) {
           minify: resolvedConfig.define?.PRODUCTION ?? false,
           outDir: distDir,
           write: false,
-          rolldownOptions: {
-            ...clientRolldownOptions,
+          rollupOptions: {
+            ...clientRollupOptions,
             output: { format: "esm" },
             input: resolve(root, clientEntry)
           }
@@ -379,21 +380,27 @@ function gas(options = {}) {
         define: resolvedConfig.define
       });
       const buildOutput = await build(clientConfig);
-      await writeFile(
-        resolve(distDir, "Client.html"),
-        // @ts-expect-error - output is an array of RollupOutput
-        buildOutput.output[0].source,
-        "utf-8"
+      const outputs = buildOutput.output;
+      const html = outputs.find(
+        (o) => o.type === "asset" && o.fileName.endsWith(".html")
       );
+      if (html?.source) {
+        await writeFile(resolve(distDir, "Client.html"), html.source, "utf-8");
+      } else {
+        throw new Error(
+          "vite-plugin-gasforge: no HTML asset found in client build output"
+        );
+      }
     }
   };
 }
 function gasClientPlugin() {
   return {
-    name: "vite-plugin-gas:client",
+    name: "vite-plugin-gasforge:client",
     enforce: "pre",
     resolveId(source) {
-      if (source === "vite-plugin-gas") return VIRTUAL_CLIENT_RUNTIME;
+      if (source === "vite-plugin-gasforge" || source === "vite-plugin-gasforge")
+        return VIRTUAL_CLIENT_RUNTIME;
       if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
       return null;
     },
