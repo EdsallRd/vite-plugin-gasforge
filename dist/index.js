@@ -207,12 +207,15 @@ export function createServerFn(def) {
     const validated = await __validate(def.input, input);
     return new Promise((resolve, reject) => {
       google.script.run
-        .withSuccessHandler(async (result) => {
-          try { resolve(await __validate(def.output, result)); }
+        .withSuccessHandler(async (raw) => {
+          try {
+            const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+            resolve(await __validate(def.output, result));
+          }
           catch (err) { reject(err); }
         })
         .withFailureHandler(reject)
-        [def.__name](validated);
+        [def.__name](JSON.stringify(validated ?? null));
     });
   };
 }
@@ -257,7 +260,11 @@ var VIRTUAL_SERVER_RUNTIME = "virtual:gas/server-runtime";
 var VIRTUAL_CLIENT_RUNTIME = "virtual:gas/client-runtime";
 var SERVER_RUNTIME = `
 export function createServerFn(def) {
-  return async (...args) => def.handler(args[0]);
+  return async (...args) => {
+    const input = typeof args[0] === "string" ? JSON.parse(args[0]) : args[0];
+    const result = await def.handler(input);
+    return JSON.stringify(result ?? null);
+  };
 }
 `;
 function gas(options = {}) {
