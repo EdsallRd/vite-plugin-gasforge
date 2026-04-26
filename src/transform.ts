@@ -11,6 +11,382 @@
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 /**
+ * Information about a single top-level `import` statement.
+ */
+interface ImportInfo {
+  /** The full statement text, including newlines if multi-line. */
+  text: string;
+  /** Byte offset of the `i` in `import`. */
+  start: number;
+  /** Byte offset just past the end of the statement (exclusive). */
+  end: number;
+  /** True for `import type { ... }` or `import type X from ...`. */
+  isTypeOnly: boolean;
+  /** True for `import "polyfill"` (no `from`). */
+  isSideEffect: boolean;
+  /** Local name of a default import (`import X from "..."`). */
+  defaultName?: string;
+  /** Local names of named bindings (post-`as`); excludes leading `type ` prefix. */
+  namedBindings: string[];
+  /** Local name of a namespace import (`import * as X from "..."`). */
+  namespaceName?: string;
+}
+
+/**
+ * Scan `code` and return all top-level `import` statements as structured records.
+ *
+ * String/comment-aware: respects single, double, and template string literals
+ * (with escape handling), line comments, and block comments. Filters out
+ * `import.meta`, dynamic `import(...)`, and substrings inside identifiers.
+ */
+function scanImports(code: string): ImportInfo[] {
+  const out: ImportInfo[] = [];
+  const len = code.length;
+  let i = 0;
+  let inString: string | null = null;
+  let prevChar = "";
+
+  while (i < len) {
+    const ch = code[i];
+
+    // String state
+    if (inString) {
+      if (ch === inString && prevChar !== "\\") inString = null;
+      prevChar = ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+      prevChar = ch;
+      i++;
+      continue;
+    }
+
+    // Comments
+    if (ch === "/" && code[i + 1] === "/") {
+      const eol = code.indexOf("\n", i);
+      i = eol === -1 ? len : eol + 1;
+      prevChar = "\n";
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      const end = code.indexOf("*/", i + 2);
+      i = end === -1 ? len : end + 2;
+      prevChar = "/";
+      continue;
+    }
+
+    // Look for the keyword `import`
+    if (
+      ch === "i" &&
+      code.slice(i, i + 6) === "import" &&
+      // not preceded by an identifier character (so we don't match `reimport`)
+      !/[A-Za-z0-9_$]/.test(prevChar)
+    ) {
+      const after = code[i + 6];
+      // Reject substrings inside identifiers: `importMap`, `imports`, etc.
+      if (after !== undefined && /[A-Za-z0-9_$]/.test(after)) {
+        prevChar = ch;
+        i++;
+        continue;
+      }
+      // Reject `import.meta` and dynamic `import(...)`
+      // Skip whitespace to peek the next significant char
+      let p = i + 6;
+      while (p < len && /\s/.test(code[p])) p++;
+      const next = code[p];
+      if (next === "." || next === "(") {
+        // not an import statement
+        prevChar = ch;
+        i++;
+        continue;
+      }
+      // Must be followed by whitespace, `{`, `"`, `'`, `*`, or an identifier (default/namespace/type form).
+      // (We've already consumed whitespace above into `p`.)
+      if (
+        next !== "{" &&
+        next !== '"' &&
+        next !== "'" &&
+        next !== "*" &&
+        !(next !== undefined && /[A-Za-z_$]/.test(next))
+      ) {
+        prevChar = ch;
+        i++;
+        continue;
+      }
+
+      const stmtStart = i;
+      const info = parseImportFrom(code, stmtStart);
+      if (info) {
+        out.push(info);
+        i = info.end;
+        prevChar = code[i - 1] ?? "";
+        continue;
+      }
+      // If parse failed, advance past the keyword to avoid an infinite loop.
+      i += 6;
+      prevChar = "t";
+      continue;
+    }
+
+    prevChar = ch;
+    i++;
+  }
+
+  return out;
+}
+
+/**
+ * Parse a single import statement starting at `start` (where `code[start..start+6] === "import"`).
+ * Returns the parsed info, or null if the statement could not be parsed.
+ */
+function parseImportFrom(code: string, start: number): ImportInfo | null {
+  const len = code.length;
+  let i = start + 6; // past `import`
+  let isTypeOnly = false;
+  let defaultName: string | undefined;
+  let namespaceName: string | undefined;
+  const namedBindings: string[] = [];
+  let sawClause = false;
+
+  // Advance past whitespace/comments helper
+  const skipWs = () => {
+    while (i < len) {
+      const ch = code[i];
+      if (/\s/.test(ch)) {
+        i++;
+        continue;
+      }
+      if (ch === "/" && code[i + 1] === "/") {
+        const eol = code.indexOf("\n", i);
+        i = eol === -1 ? len : eol + 1;
+        continue;
+      }
+      if (ch === "/" && code[i + 1] === "*") {
+        const end = code.indexOf("*/", i + 2);
+        i = end === -1 ? len : end + 2;
+        continue;
+      }
+      break;
+    }
+  };
+
+  skipWs();
+
+  // Side-effect import: `import "..."` or `import '...'`
+  if (code[i] === '"' || code[i] === "'") {
+    const quoteEnd = consumeStringLiteral(code, i);
+    if (quoteEnd === -1) return null;
+    let end = quoteEnd;
+    if (code[end] === ";") end++;
+    return {
+      text: code.slice(start, end),
+      start,
+      end,
+      isTypeOnly: false,
+      isSideEffect: true,
+      namedBindings: [],
+    };
+  }
+
+  // Optional `type` keyword (import type ...)
+  if (code.slice(i, i + 4) === "type" && /\s/.test(code[i + 4] ?? "")) {
+    isTypeOnly = true;
+    i += 4;
+    skipWs();
+  }
+
+  // Possible forms now:
+  //   { ... }
+  //   * as Name
+  //   DefaultName
+  //   DefaultName, { ... }
+  //   DefaultName, * as Name
+  if (code[i] === "{") {
+    const closeIdx = findMatchingBrace(code, i);
+    if (closeIdx === -1) return null;
+    const inner = code.slice(i + 1, closeIdx);
+    parseNamedBindings(inner, namedBindings);
+    i = closeIdx + 1;
+    sawClause = true;
+  } else if (code[i] === "*") {
+    i++;
+    skipWs();
+    if (code.slice(i, i + 2) === "as" && /\s/.test(code[i + 2] ?? "")) {
+      i += 2;
+      skipWs();
+      const id = consumeIdentifier(code, i);
+      if (!id) return null;
+      namespaceName = id.name;
+      i = id.end;
+      sawClause = true;
+    } else {
+      return null;
+    }
+  } else {
+    // Default import
+    const id = consumeIdentifier(code, i);
+    if (!id) return null;
+    defaultName = id.name;
+    i = id.end;
+    sawClause = true;
+
+    skipWs();
+    if (code[i] === ",") {
+      i++;
+      skipWs();
+      if (code[i] === "{") {
+        const closeIdx = findMatchingBrace(code, i);
+        if (closeIdx === -1) return null;
+        const inner = code.slice(i + 1, closeIdx);
+        parseNamedBindings(inner, namedBindings);
+        i = closeIdx + 1;
+      } else if (code[i] === "*") {
+        i++;
+        skipWs();
+        if (code.slice(i, i + 2) === "as" && /\s/.test(code[i + 2] ?? "")) {
+          i += 2;
+          skipWs();
+          const ns = consumeIdentifier(code, i);
+          if (!ns) return null;
+          namespaceName = ns.name;
+          i = ns.end;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    }
+  }
+
+  if (!sawClause) return null;
+
+  skipWs();
+
+  // Expect `from`
+  if (code.slice(i, i + 4) !== "from" || !/\s|["']/.test(code[i + 4] ?? "")) {
+    return null;
+  }
+  i += 4;
+  skipWs();
+
+  if (code[i] !== '"' && code[i] !== "'") return null;
+  const quoteEnd = consumeStringLiteral(code, i);
+  if (quoteEnd === -1) return null;
+  let end = quoteEnd;
+  // Optional trailing semicolon
+  if (code[end] === ";") end++;
+
+  return {
+    text: code.slice(start, end),
+    start,
+    end,
+    isTypeOnly,
+    isSideEffect: false,
+    defaultName,
+    namedBindings,
+    namespaceName,
+  };
+}
+
+/**
+ * Consume a quoted string literal starting at `code[start]`.
+ * Returns the index just past the closing quote, or -1 if not closed.
+ */
+function consumeStringLiteral(code: string, start: number): number {
+  const quote = code[start];
+  if (quote !== '"' && quote !== "'") return -1;
+  let i = start + 1;
+  let prev = "";
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === quote && prev !== "\\") return i + 1;
+    if (ch === "\n" && prev !== "\\") return -1; // unterminated
+    prev = ch === "\\" && prev === "\\" ? "" : ch;
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Find the index of the `}` matching the `{` at `start`. String/comment-aware.
+ */
+function findMatchingBrace(code: string, start: number): number {
+  if (code[start] !== "{") return -1;
+  let depth = 1;
+  let i = start + 1;
+  let inStr: string | null = null;
+  let prev = "";
+  while (i < code.length) {
+    const ch = code[i];
+    if (inStr) {
+      if (ch === inStr && prev !== "\\") inStr = null;
+      prev = ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      prev = ch;
+      i++;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "/") {
+      const eol = code.indexOf("\n", i);
+      i = eol === -1 ? code.length : eol + 1;
+      prev = "\n";
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      const end = code.indexOf("*/", i + 2);
+      i = end === -1 ? code.length : end + 2;
+      prev = "/";
+      continue;
+    }
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    prev = ch;
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Consume an identifier starting at `start`. Returns null if no identifier.
+ */
+function consumeIdentifier(
+  code: string,
+  start: number,
+): { name: string; end: number } | null {
+  if (!/[A-Za-z_$]/.test(code[start] ?? "")) return null;
+  let i = start + 1;
+  while (i < code.length && /[A-Za-z0-9_$]/.test(code[i])) i++;
+  return { name: code.slice(start, i), end: i };
+}
+
+/**
+ * Parse the contents between `{` and `}` of a named-import clause.
+ * For each binding, push the local name (post-`as`) onto `out`.
+ * Strips any leading `type ` (mixed type/value imports — erased at runtime).
+ */
+function parseNamedBindings(inner: string, out: string[]): void {
+  for (const raw of inner.split(",")) {
+    let token = raw.trim();
+    if (!token) continue;
+    if (token.startsWith("type ")) token = token.slice(5).trim();
+    if (!token) continue;
+    const parts = token.split(/\s+as\s+/);
+    const local = (parts[1] || parts[0]).trim();
+    if (local) out.push(local);
+  }
+}
+
+/**
  * Starting from `startIndex`, find where a JS value ends at nesting depth 0.
  * Returns the index of the terminating `,` or `}` (not consumed).
  */
@@ -211,51 +587,69 @@ function stripHandlerProperty(objectStr: string): string {
 /**
  * Remove import statements where none of the imported names appear
  * in the rest of the code (outside of import statements).
+ *
+ * Multi-line imports are handled correctly by character-level scanning.
+ * Output for kept regions is byte-identical to the input.
  */
 function stripUnusedImports(code: string): string {
-  const lines = code.split("\n");
+  const importInfos = scanImports(code);
+  if (importInfos.length === 0) return code;
 
-  // Collect all non-import code for usage checking
-  const nonImportCode = lines
-    .filter((l) => !l.trimStart().startsWith("import "))
-    .join("\n");
+  // Build "non-import code" by stitching together everything OUTSIDE the
+  // import ranges. Replace each import range with whitespace of equal byte
+  // length so character offsets in the rest of the code are preserved (not
+  // strictly required, but keeps line-based regex tests behaving naturally).
+  let nonImportCode = "";
+  let cursor = 0;
+  for (const info of importInfos) {
+    nonImportCode += code.slice(cursor, info.start);
+    cursor = info.end;
+  }
+  nonImportCode += code.slice(cursor);
 
-  return lines
-    .filter((line) => {
-      const trimmed = line.trimStart();
-      if (!trimmed.startsWith("import ")) return true;
+  const keep: boolean[] = importInfos.map((info) => {
+    if (info.isTypeOnly) return true;
+    if (info.isSideEffect) return true;
 
-      // Type-only imports are always safe to keep (erased at runtime)
-      if (trimmed.startsWith("import type ")) return true;
+    const candidates: string[] = [];
+    if (info.defaultName) candidates.push(info.defaultName);
+    if (info.namespaceName) candidates.push(info.namespaceName);
+    for (const n of info.namedBindings) candidates.push(n);
 
-      // Extract imported names
-      const namedMatch = trimmed.match(/import\s+\{([^}]+)\}\s+from/);
-      const defaultMatch = trimmed.match(/import\s+(\w+)\s+from/);
+    if (candidates.length === 0) return true;
 
-      if (namedMatch) {
-        const names = namedMatch[1]
-          .split(",")
-          .map((n) => {
-            const parts = n.trim().split(/\s+as\s+/);
-            return (parts[1] || parts[0]).trim();
-          })
-          .filter((n) => n && !n.startsWith("type "));
+    return candidates.some((name) =>
+      new RegExp(`\\b${escapeRegex(name)}\\b`).test(nonImportCode),
+    );
+  });
 
-        // Keep if ANY imported name is used in non-import code
-        return names.some((name) =>
-          new RegExp(`\\b${name}\\b`).test(nonImportCode),
-        );
-      }
+  // Stitch the output together: drop unkept import ranges, leave everything
+  // else byte-identical. Also collapse a single trailing newline immediately
+  // after a removed import so we don't leave behind blank lines.
+  let out = "";
+  cursor = 0;
+  for (let idx = 0; idx < importInfos.length; idx++) {
+    const info = importInfos[idx];
+    out += code.slice(cursor, info.start);
+    if (keep[idx]) {
+      out += info.text;
+    } else {
+      // Skip the import. Also consume one trailing newline (\n or \r\n) to
+      // avoid leaving an empty line behind.
+      let after = info.end;
+      if (code[after] === "\r" && code[after + 1] === "\n") after += 2;
+      else if (code[after] === "\n") after += 1;
+      cursor = after;
+      continue;
+    }
+    cursor = info.end;
+  }
+  out += code.slice(cursor);
+  return out;
+}
 
-      if (defaultMatch) {
-        const name = defaultMatch[1];
-        return new RegExp(`\\b${name}\\b`).test(nonImportCode);
-      }
-
-      // Side-effect import (import "foo") — keep
-      return true;
-    })
-    .join("\n");
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ── Server extraction ───────────────────────────────────────────────────────
@@ -273,10 +667,9 @@ export function extractForServer(code: string): string | null {
   const matches = findCreateServerFnCalls(code);
   if (matches.length === 0) return null;
 
-  const lines = code.split("\n");
-
-  // Keep all import statements
-  const imports = lines.filter((l) => l.trimStart().startsWith("import "));
+  // Collect all complete `import` statements (incl. multi-line ones).
+  // Character-level scan handles strings/comments and multi-line bindings.
+  const imports = scanImports(code).map((info) => info.text);
 
   // Extract each createServerFn declaration (from declaration start to the `;` after callEnd)
   const declarations: string[] = [];

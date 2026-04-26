@@ -9,6 +9,275 @@ import {
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 // src/transform.ts
+function scanImports(code) {
+  const out = [];
+  const len = code.length;
+  let i = 0;
+  let inString = null;
+  let prevChar = "";
+  while (i < len) {
+    const ch = code[i];
+    if (inString) {
+      if (ch === inString && prevChar !== "\\") inString = null;
+      prevChar = ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+      prevChar = ch;
+      i++;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "/") {
+      const eol = code.indexOf("\n", i);
+      i = eol === -1 ? len : eol + 1;
+      prevChar = "\n";
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      const end = code.indexOf("*/", i + 2);
+      i = end === -1 ? len : end + 2;
+      prevChar = "/";
+      continue;
+    }
+    if (ch === "i" && code.slice(i, i + 6) === "import" && // not preceded by an identifier character (so we don't match `reimport`)
+    !/[A-Za-z0-9_$]/.test(prevChar)) {
+      const after = code[i + 6];
+      if (after !== void 0 && /[A-Za-z0-9_$]/.test(after)) {
+        prevChar = ch;
+        i++;
+        continue;
+      }
+      let p = i + 6;
+      while (p < len && /\s/.test(code[p])) p++;
+      const next = code[p];
+      if (next === "." || next === "(") {
+        prevChar = ch;
+        i++;
+        continue;
+      }
+      if (next !== "{" && next !== '"' && next !== "'" && next !== "*" && !(next !== void 0 && /[A-Za-z_$]/.test(next))) {
+        prevChar = ch;
+        i++;
+        continue;
+      }
+      const stmtStart = i;
+      const info = parseImportFrom(code, stmtStart);
+      if (info) {
+        out.push(info);
+        i = info.end;
+        prevChar = code[i - 1] ?? "";
+        continue;
+      }
+      i += 6;
+      prevChar = "t";
+      continue;
+    }
+    prevChar = ch;
+    i++;
+  }
+  return out;
+}
+function parseImportFrom(code, start) {
+  const len = code.length;
+  let i = start + 6;
+  let isTypeOnly = false;
+  let defaultName;
+  let namespaceName;
+  const namedBindings = [];
+  let sawClause = false;
+  const skipWs = () => {
+    while (i < len) {
+      const ch = code[i];
+      if (/\s/.test(ch)) {
+        i++;
+        continue;
+      }
+      if (ch === "/" && code[i + 1] === "/") {
+        const eol = code.indexOf("\n", i);
+        i = eol === -1 ? len : eol + 1;
+        continue;
+      }
+      if (ch === "/" && code[i + 1] === "*") {
+        const end2 = code.indexOf("*/", i + 2);
+        i = end2 === -1 ? len : end2 + 2;
+        continue;
+      }
+      break;
+    }
+  };
+  skipWs();
+  if (code[i] === '"' || code[i] === "'") {
+    const quoteEnd2 = consumeStringLiteral(code, i);
+    if (quoteEnd2 === -1) return null;
+    let end2 = quoteEnd2;
+    if (code[end2] === ";") end2++;
+    return {
+      text: code.slice(start, end2),
+      start,
+      end: end2,
+      isTypeOnly: false,
+      isSideEffect: true,
+      namedBindings: []
+    };
+  }
+  if (code.slice(i, i + 4) === "type" && /\s/.test(code[i + 4] ?? "")) {
+    isTypeOnly = true;
+    i += 4;
+    skipWs();
+  }
+  if (code[i] === "{") {
+    const closeIdx = findMatchingBrace(code, i);
+    if (closeIdx === -1) return null;
+    const inner = code.slice(i + 1, closeIdx);
+    parseNamedBindings(inner, namedBindings);
+    i = closeIdx + 1;
+    sawClause = true;
+  } else if (code[i] === "*") {
+    i++;
+    skipWs();
+    if (code.slice(i, i + 2) === "as" && /\s/.test(code[i + 2] ?? "")) {
+      i += 2;
+      skipWs();
+      const id = consumeIdentifier(code, i);
+      if (!id) return null;
+      namespaceName = id.name;
+      i = id.end;
+      sawClause = true;
+    } else {
+      return null;
+    }
+  } else {
+    const id = consumeIdentifier(code, i);
+    if (!id) return null;
+    defaultName = id.name;
+    i = id.end;
+    sawClause = true;
+    skipWs();
+    if (code[i] === ",") {
+      i++;
+      skipWs();
+      if (code[i] === "{") {
+        const closeIdx = findMatchingBrace(code, i);
+        if (closeIdx === -1) return null;
+        const inner = code.slice(i + 1, closeIdx);
+        parseNamedBindings(inner, namedBindings);
+        i = closeIdx + 1;
+      } else if (code[i] === "*") {
+        i++;
+        skipWs();
+        if (code.slice(i, i + 2) === "as" && /\s/.test(code[i + 2] ?? "")) {
+          i += 2;
+          skipWs();
+          const ns = consumeIdentifier(code, i);
+          if (!ns) return null;
+          namespaceName = ns.name;
+          i = ns.end;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    }
+  }
+  if (!sawClause) return null;
+  skipWs();
+  if (code.slice(i, i + 4) !== "from" || !/\s|["']/.test(code[i + 4] ?? "")) {
+    return null;
+  }
+  i += 4;
+  skipWs();
+  if (code[i] !== '"' && code[i] !== "'") return null;
+  const quoteEnd = consumeStringLiteral(code, i);
+  if (quoteEnd === -1) return null;
+  let end = quoteEnd;
+  if (code[end] === ";") end++;
+  return {
+    text: code.slice(start, end),
+    start,
+    end,
+    isTypeOnly,
+    isSideEffect: false,
+    defaultName,
+    namedBindings,
+    namespaceName
+  };
+}
+function consumeStringLiteral(code, start) {
+  const quote = code[start];
+  if (quote !== '"' && quote !== "'") return -1;
+  let i = start + 1;
+  let prev = "";
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === quote && prev !== "\\") return i + 1;
+    if (ch === "\n" && prev !== "\\") return -1;
+    prev = ch === "\\" && prev === "\\" ? "" : ch;
+    i++;
+  }
+  return -1;
+}
+function findMatchingBrace(code, start) {
+  if (code[start] !== "{") return -1;
+  let depth = 1;
+  let i = start + 1;
+  let inStr = null;
+  let prev = "";
+  while (i < code.length) {
+    const ch = code[i];
+    if (inStr) {
+      if (ch === inStr && prev !== "\\") inStr = null;
+      prev = ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      prev = ch;
+      i++;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "/") {
+      const eol = code.indexOf("\n", i);
+      i = eol === -1 ? code.length : eol + 1;
+      prev = "\n";
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      const end = code.indexOf("*/", i + 2);
+      i = end === -1 ? code.length : end + 2;
+      prev = "/";
+      continue;
+    }
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    prev = ch;
+    i++;
+  }
+  return -1;
+}
+function consumeIdentifier(code, start) {
+  if (!/[A-Za-z_$]/.test(code[start] ?? "")) return null;
+  let i = start + 1;
+  while (i < code.length && /[A-Za-z0-9_$]/.test(code[i])) i++;
+  return { name: code.slice(start, i), end: i };
+}
+function parseNamedBindings(inner, out) {
+  for (const raw of inner.split(",")) {
+    let token = raw.trim();
+    if (!token) continue;
+    if (token.startsWith("type ")) token = token.slice(5).trim();
+    if (!token) continue;
+    const parts = token.split(/\s+as\s+/);
+    const local = (parts[1] || parts[0]).trim();
+    if (local) out.push(local);
+  }
+}
 function findValueEnd(code, startIndex) {
   let depth = 0;
   let i = startIndex;
@@ -130,36 +399,54 @@ function stripHandlerProperty(objectStr) {
   return objectStr;
 }
 function stripUnusedImports(code) {
-  const lines = code.split("\n");
-  const nonImportCode = lines.filter((l) => !l.trimStart().startsWith("import ")).join("\n");
-  return lines.filter((line) => {
-    const trimmed = line.trimStart();
-    if (!trimmed.startsWith("import ")) return true;
-    if (trimmed.startsWith("import type ")) return true;
-    const namedMatch = trimmed.match(/import\s+\{([^}]+)\}\s+from/);
-    const defaultMatch = trimmed.match(/import\s+(\w+)\s+from/);
-    if (namedMatch) {
-      const names = namedMatch[1].split(",").map((n) => {
-        const parts = n.trim().split(/\s+as\s+/);
-        return (parts[1] || parts[0]).trim();
-      }).filter((n) => n && !n.startsWith("type "));
-      return names.some(
-        (name) => new RegExp(`\\b${name}\\b`).test(nonImportCode)
-      );
+  const importInfos = scanImports(code);
+  if (importInfos.length === 0) return code;
+  let nonImportCode = "";
+  let cursor = 0;
+  for (const info of importInfos) {
+    nonImportCode += code.slice(cursor, info.start);
+    cursor = info.end;
+  }
+  nonImportCode += code.slice(cursor);
+  const keep = importInfos.map((info) => {
+    if (info.isTypeOnly) return true;
+    if (info.isSideEffect) return true;
+    const candidates = [];
+    if (info.defaultName) candidates.push(info.defaultName);
+    if (info.namespaceName) candidates.push(info.namespaceName);
+    for (const n of info.namedBindings) candidates.push(n);
+    if (candidates.length === 0) return true;
+    return candidates.some(
+      (name) => new RegExp(`\\b${escapeRegex(name)}\\b`).test(nonImportCode)
+    );
+  });
+  let out = "";
+  cursor = 0;
+  for (let idx = 0; idx < importInfos.length; idx++) {
+    const info = importInfos[idx];
+    out += code.slice(cursor, info.start);
+    if (keep[idx]) {
+      out += info.text;
+    } else {
+      let after = info.end;
+      if (code[after] === "\r" && code[after + 1] === "\n") after += 2;
+      else if (code[after] === "\n") after += 1;
+      cursor = after;
+      continue;
     }
-    if (defaultMatch) {
-      const name = defaultMatch[1];
-      return new RegExp(`\\b${name}\\b`).test(nonImportCode);
-    }
-    return true;
-  }).join("\n");
+    cursor = info.end;
+  }
+  out += code.slice(cursor);
+  return out;
+}
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function extractForServer(code) {
   if (!code.includes("createServerFn")) return null;
   const matches = findCreateServerFnCalls(code);
   if (matches.length === 0) return null;
-  const lines = code.split("\n");
-  const imports = lines.filter((l) => l.trimStart().startsWith("import "));
+  const imports = scanImports(code).map((info) => info.text);
   const declarations = [];
   const names = [];
   for (const match of matches) {
