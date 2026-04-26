@@ -2,7 +2,7 @@
   "name": "vite-plugin-gasforge",
   "version": "0.2.2",
   "description": "A Vite plugin for building Google Apps Script projects with type-safe server functions.",
-  "author": "Edsall Road <https://github.com/EdsallRd>",
+  "author": "Edsall Park <https://github.com/EdsallRd>",
   "repository": {
     "type": "git",
     "url": "https://github.com/EdsallRd/vite-plugin-gasforge.git"
