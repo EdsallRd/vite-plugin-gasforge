@@ -356,11 +356,7 @@ function gasClientPlugin(): Plugin {
     enforce: "pre",
 
     resolveId(source) {
-      if (
-        source === "vite-plugin-gasforge" ||
-        source === "vite-plugin-gasforge"
-      )
-        return VIRTUAL_CLIENT_RUNTIME;
+      if (source === "vite-plugin-gasforge") return VIRTUAL_CLIENT_RUNTIME;
       if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
       return null;
     },
