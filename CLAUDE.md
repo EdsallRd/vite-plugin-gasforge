@@ -61,5 +61,4 @@ Sibling apps depend on it via `"vite-plugin-gasforge": "workspace:*"`. The npm n
 
 ## Notes
 
-- The `gasClientPlugin().resolveId` block has a duplicated `source === "vite-plugin-gasforge"` check (harmless, but a candidate cleanup if touched).
-- `transform.ts` uses regex/string scanning rather than a real parser; works for the supported `const NAME = createServerFn({...})` form.
+- `transform.ts` parses imports with a hand-rolled scanner (`scanImports`/`parseImportFrom`), but `createServerFn` call detection inside source bodies still uses regex matching — works for the supported `const NAME = createServerFn({...})` form.
