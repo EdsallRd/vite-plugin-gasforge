@@ -319,15 +319,37 @@ function findValueEnd(code, startIndex) {
   return i;
 }
 function findCreateServerFnCalls(code) {
-  const pattern = /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*createServerFn\s*\(/g;
+  const pattern = /(?:export\s+)?(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*createServerFn\b/g;
   const matches = [];
   let m;
   while ((m = pattern.exec(code)) !== null) {
     const name = m[1];
     const declStart = m.index;
-    const parenOpen = m.index + m[0].length - 1;
+    let i = m.index + m[0].length;
+    while (i < code.length && /\s/.test(code[i])) i++;
+    if (code[i] === "<") {
+      let gDepth = 1;
+      i++;
+      let inStr2 = null;
+      while (i < code.length && gDepth > 0) {
+        const ch = code[i];
+        if (inStr2) {
+          if (ch === inStr2 && code[i - 1] !== "\\") inStr2 = null;
+        } else if (ch === '"' || ch === "'" || ch === "`") {
+          inStr2 = ch;
+        } else if (ch === "<") {
+          gDepth++;
+        } else if (ch === ">") {
+          gDepth--;
+        }
+        i++;
+      }
+      while (i < code.length && /\s/.test(code[i])) i++;
+    }
+    if (code[i] !== "(") continue;
+    const parenOpen = i;
     let depth = 1;
-    let i = parenOpen + 1;
+    i++;
     let inStr = null;
     while (i < code.length && depth > 0) {
       const ch = code[i];
@@ -375,13 +397,38 @@ function transformForClient(code) {
   return result;
 }
 function stripHandlerProperty(objectStr) {
-  const handlerPattern = /\bhandler\s*:\s*/g;
+  const handlerPattern = /(?:async\s+)?\bhandler\s*(?::|\()/g;
   let m;
   while ((m = handlerPattern.exec(objectStr)) !== null) {
-    const valueStart = m.index + m[0].length;
-    const valueEnd = findValueEnd(objectStr, valueStart);
     let removeStart = m.index;
-    let removeEnd = valueEnd;
+    let removeEnd;
+    const matched = m[0];
+    if (matched.endsWith(":")) {
+      const valueStart = m.index + matched.length;
+      removeEnd = findValueEnd(objectStr, valueStart);
+    } else {
+      const parenOpen = m.index + matched.length - 1;
+      let depth = 1;
+      let i = parenOpen + 1;
+      let inStr = null;
+      while (i < objectStr.length && depth > 0) {
+        const ch = objectStr[i];
+        if (inStr) {
+          if (ch === inStr && objectStr[i - 1] !== "\\") inStr = null;
+        } else if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+        } else if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        i++;
+      }
+      while (i < objectStr.length && objectStr[i] !== "{") i++;
+      if (i < objectStr.length && objectStr[i] === "{") {
+        const braceClose = findMatchingBrace(objectStr, i);
+        removeEnd = braceClose === -1 ? objectStr.length : braceClose + 1;
+      } else {
+        removeEnd = i;
+      }
+    }
     if (objectStr[removeEnd] === ",") {
       removeEnd++;
       while (removeEnd < objectStr.length && /\s/.test(objectStr[removeEnd])) {
@@ -548,15 +595,23 @@ var package_default = {
   },
   devDependencies: {
     "@standard-schema/spec": "^1.1.0",
+    "@types/acorn": "^4.0.6",
     "@types/node": "^26.1.0",
     tsup: "^8.5.1",
     typescript: "^6.0.3",
     vite: "^8.1.3",
-    "vite-plugin-singlefile": "^2.3.0"
+    "vite-plugin-singlefile": "^2.3.0",
+    vitest: "^4.1.9"
   },
   scripts: {
     build: "tsup",
-    dev: "tsup --watch"
+    dev: "tsup --watch",
+    test: "vitest run"
+  },
+  dependencies: {
+    acorn: "^8.17.0",
+    "magic-string": "^0.30.21",
+    superjson: "^2.2.6"
   }
 };
 
@@ -568,40 +623,119 @@ var PKG_NAME = package_default.name;
 
 // src/plugin/runtimes.ts
 var CLIENT_RUNTIME = `
-async function __validate(schema, value) {
+import superjson from "superjson";
+
+async function __validate(schema, value, errorCode) {
+  if (!schema || !schema["~standard"]) return value;
   const result = await schema["~standard"].validate(value);
   if ("issues" in result && result.issues) {
-    throw new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
+    const err = new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
+    err.name = "GASForgeError";
+    err.code = errorCode;
+    err.issues = result.issues;
+    throw err;
   }
   return result.value;
 }
 
 export function createServerFn(def) {
-  return async (...args) => {
+  const fn = async (...args) => {
     const input = args[0];
-    const validated = await __validate(def.input, input);
+    const validated = await __validate(def.input, input, "INPUT_VALIDATION_FAILED");
+    const serializedInput = superjson.stringify(validated ?? null);
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler(async (raw) => {
           try {
-            const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-            resolve(await __validate(def.output, result));
-          }
-          catch (err) { reject(err); }
+            const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+            if (parsed && typeof parsed === "object" && parsed.__gas_error) {
+              const err = new Error(parsed.message || "Server Error");
+              err.name = "GASForgeError";
+              err.code = parsed.code || "SERVER_ERROR";
+              err.stack = parsed.stack;
+              reject(err);
+              return;
+            }
+            const deserialized = superjson.deserialize(parsed);
+            resolve(await __validate(def.output, deserialized, "OUTPUT_VALIDATION_FAILED"));
+          } catch (err) { reject(err); }
         })
-        .withFailureHandler(reject)
-        [def.__name](JSON.stringify(validated ?? null));
+        .withFailureHandler((err) => {
+          const rpcErr = new Error(err?.message || String(err));
+          rpcErr.name = "GASForgeError";
+          rpcErr.code = "RPC_ERROR";
+          reject(rpcErr);
+        })
+        [def.__name](serializedInput);
     });
   };
+
+  const name = def.__name || "serverFn";
+  fn.queryKey = (input) => [name, input];
+  fn.queryOptions = (input) => ({
+    queryKey: [name, input],
+    queryFn: () => fn(input),
+  });
+
+  return fn;
 }
 `;
 var SERVER_RUNTIME = `
+import superjson from "superjson";
+
+async function __validateServer(schema, value, errorCode) {
+  if (!schema || !schema["~standard"]) return value;
+  const result = await schema["~standard"].validate(value);
+  if ("issues" in result && result.issues) {
+    const err = new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
+    err.code = errorCode;
+    throw err;
+  }
+  return result.value;
+}
+
 export function createServerFn(def) {
-  return async (...args) => {
-    const input = typeof args[0] === "string" ? JSON.parse(args[0]) : args[0];
-    const result = await def.handler(input);
-    return JSON.stringify(result ?? null);
+  const fn = async (...args) => {
+    try {
+      const rawInput = args[0];
+      let input;
+      if (typeof rawInput === "string") {
+        input = superjson.parse(rawInput);
+      } else if (rawInput && typeof rawInput === "object" && ("json" in rawInput || "meta" in rawInput)) {
+        input = superjson.deserialize(rawInput);
+      } else {
+        input = rawInput;
+      }
+      const validatedInput = await __validateServer(def.input, input, "INPUT_VALIDATION_FAILED");
+      let ctx = {};
+      if (def.middleware) {
+        for (const mw of def.middleware) {
+          const nextCtx = await mw.handler(ctx);
+          ctx = { ...ctx, ...nextCtx };
+        }
+      }
+      const result = await def.handler(validatedInput, ctx);
+      const validatedOutput = await __validateServer(def.output, result, "OUTPUT_VALIDATION_FAILED");
+      return JSON.stringify(superjson.serialize(validatedOutput ?? null));
+    } catch (err) {
+      const errorObj = {
+        __gas_error: true,
+        code: err.code || "SERVER_ERROR",
+        message: err.message || String(err),
+        stack: err.stack,
+      };
+      return JSON.stringify(errorObj);
+    }
   };
+
+  const name = def.__name || "serverFn";
+  fn.queryKey = (input) => [name, input];
+  fn.queryOptions = (input) => ({
+    queryKey: [name, input],
+    queryFn: () => fn(input),
+  });
+
+  return fn;
 }
 `;
 
@@ -771,13 +905,56 @@ function gas(options = {}) {
 
 // src/server-fn.ts
 function createServerFn(def) {
-  const fn = async (...args) => def.handler(args[0]);
-  return fn;
+  const fn = async (...args) => {
+    const input = args[0];
+    let ctx = {};
+    if (def.middleware) {
+      for (const mw of def.middleware) {
+        const nextCtx = await mw.handler(ctx);
+        ctx = { ...ctx, ...nextCtx };
+      }
+    }
+    return def.handler(input, ctx);
+  };
+  const name = def.__name || "serverFn";
+  const ext = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    queryKey: (...args) => [name, args[0]],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    queryOptions: (...args) => ({
+      queryKey: [name, args[0]],
+      queryFn: () => fn(args[0])
+    })
+  };
+  return Object.assign(fn, ext);
 }
+
+// src/middleware.ts
+function createMiddleware() {
+  return {
+    handler(fn) {
+      return { handler: fn };
+    }
+  };
+}
+
+// src/errors.ts
+var GASForgeError = class extends Error {
+  code;
+  issues;
+  constructor(code, message, issues) {
+    super(message);
+    this.name = "GASForgeError";
+    this.code = code;
+    this.issues = issues;
+  }
+};
 
 // src/index.ts
 var src_default = gas;
 export {
+  GASForgeError,
+  createMiddleware,
   createServerFn,
   src_default as default
 };
