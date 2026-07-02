@@ -1,6 +1,9 @@
 import { resolve, dirname } from "path";
 import { readFileSync } from "fs";
 import { writeFile } from "fs/promises";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
 import {
   build,
   defineConfig,
@@ -13,8 +16,8 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 import { extractForServer } from "../transform";
 import { buildRegistry, type FnEntry } from "../scanner";
 import { gasClientPlugin } from "./client";
-import { SERVER_RUNTIME } from "./runtimes";
-import { VIRTUAL_SERVER_FNS, VIRTUAL_SERVER_RUNTIME, PKG_NAME } from "./constants";
+import { getRuntimePath } from "./runtime-path";
+import { VIRTUAL_SERVER_FNS, PKG_NAME } from "./constants";
 
 export interface GASPluginOptions {
   server?: string;
@@ -85,11 +88,10 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
     // Resolve virtual modules for the server build
     resolveId(source) {
       if (source === VIRTUAL_SERVER_FNS) return "\0" + VIRTUAL_SERVER_FNS;
-      if (source === VIRTUAL_SERVER_RUNTIME)
-        return "\0" + VIRTUAL_SERVER_RUNTIME;
-      // Redirect plugin imports in source files to lightweight server runtime
-      if (source === PKG_NAME)
-        return "\0" + VIRTUAL_SERVER_RUNTIME;
+      // Redirect plugin imports in source files to physical server runtime
+      if (source === PKG_NAME) {
+        return getRuntimePath();
+      }
       // ?gas-server modules: no \0 prefix so TS/JSX transforms still run
       if (source.endsWith("?gas-server")) return source;
       return null;
@@ -97,9 +99,6 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
 
     // Load virtual modules for the server build
     load(id) {
-      // Lightweight server runtime (no Node APIs)
-      if (id === "\0" + VIRTUAL_SERVER_RUNTIME) return SERVER_RUNTIME;
-
       // Virtual server functions entry — re-exports all discovered functions
       if (id === "\0" + VIRTUAL_SERVER_FNS) {
         if (registry.length === 0) return "export {};";

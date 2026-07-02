@@ -1,7 +1,13 @@
+import {
+  GASForgeError,
+  createMiddleware
+} from "./chunk-NPYBMD4H.js";
+
 // src/plugin/index.ts
-import { resolve as resolve2, dirname } from "path";
+import { resolve as resolve3, dirname as dirname2 } from "path";
 import { readFileSync as readFileSync2 } from "fs";
 import { writeFile } from "fs/promises";
+import { createRequire as createRequire2 } from "module";
 import {
   build,
   defineConfig
@@ -564,10 +570,13 @@ function buildRegistry(srcDir) {
   return registry;
 }
 
+// src/plugin/client.ts
+import { createRequire } from "module";
+
 // package.json
 var package_default = {
   name: "@edsallrd/vite-plugin-gasforge",
-  version: "0.2.3",
+  version: "0.3.0",
   description: "A Vite plugin for building Google Apps Script projects with type-safe server functions.",
   author: "Edsall Park <https://github.com/EdsallRd>",
   repository: {
@@ -617,141 +626,38 @@ var package_default = {
 
 // src/plugin/constants.ts
 var VIRTUAL_SERVER_FNS = "virtual:gas/server-fns";
-var VIRTUAL_SERVER_RUNTIME = "virtual:gas/server-runtime";
-var VIRTUAL_CLIENT_RUNTIME = "virtual:gas/client-runtime";
 var PKG_NAME = package_default.name;
 
-// src/plugin/runtimes.ts
-var CLIENT_RUNTIME = `
-import superjson from "superjson";
-
-async function __validate(schema, value, errorCode) {
-  if (!schema || !schema["~standard"]) return value;
-  const result = await schema["~standard"].validate(value);
-  if ("issues" in result && result.issues) {
-    const err = new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
-    err.name = "GASForgeError";
-    err.code = errorCode;
-    err.issues = result.issues;
-    throw err;
+// src/plugin/runtime-path.ts
+import { fileURLToPath } from "url";
+import { dirname, resolve as resolve2 } from "path";
+import { existsSync } from "fs";
+function getRuntimePath() {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const distPath = resolve2(currentDir, "./runtime.js");
+  if (existsSync(distPath)) {
+    return distPath;
   }
-  return result.value;
-}
-
-export function createServerFn(def) {
-  const fn = async (...args) => {
-    const input = args[0];
-    const validated = await __validate(def.input, input, "INPUT_VALIDATION_FAILED");
-    const serializedInput = superjson.stringify(validated ?? null);
-    return new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(async (raw) => {
-          try {
-            const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-            if (parsed && typeof parsed === "object" && parsed.__gas_error) {
-              const err = new Error(parsed.message || "Server Error");
-              err.name = "GASForgeError";
-              err.code = parsed.code || "SERVER_ERROR";
-              err.stack = parsed.stack;
-              reject(err);
-              return;
-            }
-            const deserialized = superjson.deserialize(parsed);
-            resolve(await __validate(def.output, deserialized, "OUTPUT_VALIDATION_FAILED"));
-          } catch (err) { reject(err); }
-        })
-        .withFailureHandler((err) => {
-          const rpcErr = new Error(err?.message || String(err));
-          rpcErr.name = "GASForgeError";
-          rpcErr.code = "RPC_ERROR";
-          reject(rpcErr);
-        })
-        [def.__name](serializedInput);
-    });
-  };
-
-  const name = def.__name || "serverFn";
-  fn.queryKey = (input) => [name, input];
-  fn.queryOptions = (input) => ({
-    queryKey: [name, input],
-    queryFn: () => fn(input),
-  });
-
-  return fn;
-}
-`;
-var SERVER_RUNTIME = `
-import superjson from "superjson";
-
-async function __validateServer(schema, value, errorCode) {
-  if (!schema || !schema["~standard"]) return value;
-  const result = await schema["~standard"].validate(value);
-  if ("issues" in result && result.issues) {
-    const err = new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
-    err.code = errorCode;
-    throw err;
+  const srcPath = resolve2(currentDir, "../runtime.ts");
+  if (existsSync(srcPath)) {
+    return srcPath;
   }
-  return result.value;
+  return distPath;
 }
-
-export function createServerFn(def) {
-  const fn = async (...args) => {
-    try {
-      const rawInput = args[0];
-      let input;
-      if (typeof rawInput === "string") {
-        input = superjson.parse(rawInput);
-      } else if (rawInput && typeof rawInput === "object" && ("json" in rawInput || "meta" in rawInput)) {
-        input = superjson.deserialize(rawInput);
-      } else {
-        input = rawInput;
-      }
-      const validatedInput = await __validateServer(def.input, input, "INPUT_VALIDATION_FAILED");
-      let ctx = {};
-      if (def.middleware) {
-        for (const mw of def.middleware) {
-          const nextCtx = await mw.handler(ctx);
-          ctx = { ...ctx, ...nextCtx };
-        }
-      }
-      const result = await def.handler(validatedInput, ctx);
-      const validatedOutput = await __validateServer(def.output, result, "OUTPUT_VALIDATION_FAILED");
-      return JSON.stringify(superjson.serialize(validatedOutput ?? null));
-    } catch (err) {
-      const errorObj = {
-        __gas_error: true,
-        code: err.code || "SERVER_ERROR",
-        message: err.message || String(err),
-        stack: err.stack,
-      };
-      return JSON.stringify(errorObj);
-    }
-  };
-
-  const name = def.__name || "serverFn";
-  fn.queryKey = (input) => [name, input];
-  fn.queryOptions = (input) => ({
-    queryKey: [name, input],
-    queryFn: () => fn(input),
-  });
-
-  return fn;
-}
-`;
 
 // src/plugin/client.ts
+var require2 = createRequire(import.meta.url);
 function gasClientPlugin() {
   return {
     name: "vite-plugin-gasforge:client",
     enforce: "pre",
     resolveId(source) {
-      if (source === PKG_NAME)
-        return VIRTUAL_CLIENT_RUNTIME;
-      if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
-      return null;
-    },
-    load(id) {
-      if (id === VIRTUAL_CLIENT_RUNTIME) return CLIENT_RUNTIME;
+      if (source === PKG_NAME) {
+        return getRuntimePath();
+      }
+      if (source === "superjson") {
+        return require2.resolve("superjson");
+      }
       return null;
     },
     // Transform source files: strip handler, inject __name
@@ -764,6 +670,7 @@ function gasClientPlugin() {
 }
 
 // src/plugin/index.ts
+var require3 = createRequire2(import.meta.url);
 function gas(options = {}) {
   const serverEntry = options.server ?? "src/server/index.ts";
   const clientEntry = options.client?.entry ?? "src/client/index.html";
@@ -778,7 +685,7 @@ function gas(options = {}) {
     configResolved(config) {
       resolvedConfig = config;
       root = config.root;
-      registry = buildRegistry(resolve2(root, "src"));
+      registry = buildRegistry(resolve3(root, "src"));
       if (registry.length > 0) {
         console.log(
           `vite-plugin-gasforge: ${registry.length} server function(s) \u2014 ${registry.map((f) => f.name).join(", ")}`
@@ -814,16 +721,14 @@ function gas(options = {}) {
     // Resolve virtual modules for the server build
     resolveId(source) {
       if (source === VIRTUAL_SERVER_FNS) return "\0" + VIRTUAL_SERVER_FNS;
-      if (source === VIRTUAL_SERVER_RUNTIME)
-        return "\0" + VIRTUAL_SERVER_RUNTIME;
-      if (source === PKG_NAME)
-        return "\0" + VIRTUAL_SERVER_RUNTIME;
+      if (source === PKG_NAME) {
+        return getRuntimePath();
+      }
       if (source.endsWith("?gas-server")) return source;
       return null;
     },
     // Load virtual modules for the server build
     load(id) {
-      if (id === "\0" + VIRTUAL_SERVER_RUNTIME) return SERVER_RUNTIME;
       if (id === "\0" + VIRTUAL_SERVER_FNS) {
         if (registry.length === 0) return "export {};";
         const byFile = /* @__PURE__ */ new Map();
@@ -856,15 +761,15 @@ function gas(options = {}) {
           console.log(
             "vite-plugin-gasforge: server function changed, re-scanning..."
           );
-          registry = buildRegistry(resolve2(root, "src"));
+          registry = buildRegistry(resolve3(root, "src"));
         }
       }
     },
     // Client build
     async closeBundle() {
       console.log("vite-plugin-gasforge: building client bundle...");
-      const clientDir = resolve2(root, dirname(clientEntry));
-      const distDir = resolvedConfig.build.outDir ? resolve2(root, resolvedConfig.build.outDir) : resolve2(root, "dist");
+      const clientDir = resolve3(root, dirname2(clientEntry));
+      const distDir = resolvedConfig.build.outDir ? resolve3(root, resolvedConfig.build.outDir) : resolve3(root, "dist");
       const clientConfig = defineConfig({
         plugins: [
           gasClientPlugin(),
@@ -879,7 +784,7 @@ function gas(options = {}) {
           rollupOptions: {
             ...clientRollupOptions,
             output: { format: "esm" },
-            input: resolve2(root, clientEntry)
+            input: resolve3(root, clientEntry)
           }
         },
         resolve: {
@@ -893,7 +798,7 @@ function gas(options = {}) {
         (o) => o.type === "asset" && o.fileName.endsWith(".html")
       );
       if (html?.source) {
-        await writeFile(resolve2(distDir, "Client.html"), html.source, "utf-8");
+        await writeFile(resolve3(distDir, "Client.html"), html.source, "utf-8");
       } else {
         throw new Error(
           "vite-plugin-gasforge: no HTML asset found in client build output"
@@ -928,27 +833,6 @@ function createServerFn(def) {
   };
   return Object.assign(fn, ext);
 }
-
-// src/middleware.ts
-function createMiddleware() {
-  return {
-    handler(fn) {
-      return { handler: fn };
-    }
-  };
-}
-
-// src/errors.ts
-var GASForgeError = class extends Error {
-  code;
-  issues;
-  constructor(code, message, issues) {
-    super(message);
-    this.name = "GASForgeError";
-    this.code = code;
-    this.issues = issues;
-  }
-};
 
 // src/index.ts
 var src_default = gas;

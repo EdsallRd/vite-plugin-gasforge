@@ -1,7 +1,10 @@
 import type { Plugin } from "vite";
+import { createRequire } from "module";
 import { transformForClient } from "../transform";
-import { VIRTUAL_CLIENT_RUNTIME, PKG_NAME } from "./constants";
-import { CLIENT_RUNTIME } from "./runtimes";
+import { PKG_NAME } from "./constants";
+import { getRuntimePath } from "./runtime-path";
+
+const require = createRequire(import.meta.url);
 
 export function gasClientPlugin(): Plugin {
   return {
@@ -9,14 +12,12 @@ export function gasClientPlugin(): Plugin {
     enforce: "pre",
 
     resolveId(source) {
-      if (source === PKG_NAME)
-        return VIRTUAL_CLIENT_RUNTIME;
-      if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
-      return null;
-    },
-
-    load(id) {
-      if (id === VIRTUAL_CLIENT_RUNTIME) return CLIENT_RUNTIME;
+      if (source === PKG_NAME) {
+        return getRuntimePath();
+      }
+      if (source === "superjson") {
+        return require.resolve("superjson");
+      }
       return null;
     },
 
