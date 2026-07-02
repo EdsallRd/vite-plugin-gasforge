@@ -23,7 +23,7 @@ export type ServerFn<
  *
  * @example
  * ```ts
- * import { createServerFn } from "vite-plugin-gasforge";
+ * import { createServerFn } from "@edsallrd/vite-plugin-gasforge";
  * import { z } from "zod";
  *
  * const getGreeting = createServerFn({

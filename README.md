@@ -21,7 +21,7 @@ pnpm add vite-plugin-gasforge vite vite-plugin-singlefile @standard-schema/spec
 
 ```ts
 import { defineConfig } from "vite";
-import gas from "vite-plugin-gasforge";
+import gas from "@edsallrd/vite-plugin-gasforge";
 
 export default defineConfig({
   plugins: [gas()],
@@ -68,7 +68,7 @@ Add the type declarations to get `google.script` types and virtual module suppor
 Use `createServerFn` to define type-safe functions that are callable from both server and client code. Any [Standard Schema](https://github.com/standard-schema/standard-schema)-compatible library (Zod, Valibot, ArkType, etc.) can be used for validation.
 
 ```ts
-import { createServerFn } from "vite-plugin-gasforge";
+import { createServerFn } from "@edsallrd/vite-plugin-gasforge";
 import { z } from "zod";
 
 export const getGreeting = createServerFn({

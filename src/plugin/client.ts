@@ -1,6 +1,6 @@
 import type { Plugin } from "vite";
 import { transformForClient } from "../transform";
-import { VIRTUAL_CLIENT_RUNTIME } from "./constants";
+import { VIRTUAL_CLIENT_RUNTIME, PKG_NAME } from "./constants";
 import { CLIENT_RUNTIME } from "./runtimes";
 
 export function gasClientPlugin(): Plugin {
@@ -9,7 +9,8 @@ export function gasClientPlugin(): Plugin {
     enforce: "pre",
 
     resolveId(source) {
-      if (source === "vite-plugin-gasforge") return VIRTUAL_CLIENT_RUNTIME;
+      if (source === PKG_NAME)
+        return VIRTUAL_CLIENT_RUNTIME;
       if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
       return null;
     },

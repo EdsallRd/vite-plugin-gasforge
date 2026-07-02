@@ -14,7 +14,7 @@ import { extractForServer } from "../transform";
 import { buildRegistry, type FnEntry } from "../scanner";
 import { gasClientPlugin } from "./client";
 import { SERVER_RUNTIME } from "./runtimes";
-import { VIRTUAL_SERVER_FNS, VIRTUAL_SERVER_RUNTIME } from "./constants";
+import { VIRTUAL_SERVER_FNS, VIRTUAL_SERVER_RUNTIME, PKG_NAME } from "./constants";
 
 export interface GASPluginOptions {
   server?: string;
@@ -36,7 +36,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
   let registry: FnEntry[] = [];
 
   return {
-    name: "vite-plugin-gasforge",
+    name: PKG_NAME,
     enforce: "pre",
 
     configResolved(config) {
@@ -84,7 +84,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       if (source === VIRTUAL_SERVER_RUNTIME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
       // Redirect plugin imports in source files to lightweight server runtime
-      if (source === "vite-plugin-gasforge")
+      if (source === PKG_NAME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
       // ?gas-server modules: no \0 prefix so TS/JSX transforms still run
       if (source.endsWith("?gas-server")) return source;

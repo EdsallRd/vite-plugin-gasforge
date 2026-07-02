@@ -517,10 +517,54 @@ function buildRegistry(srcDir) {
   return registry;
 }
 
+// package.json
+var package_default = {
+  name: "@edsallrd/vite-plugin-gasforge",
+  version: "0.2.3",
+  description: "A Vite plugin for building Google Apps Script projects with type-safe server functions.",
+  author: "Edsall Park <https://github.com/EdsallRd>",
+  repository: {
+    type: "git",
+    url: "https://github.com/EdsallRd/vite-plugin-gasforge.git"
+  },
+  homepage: "https://github.com/EdsallRd/vite-plugin-gasforge",
+  license: "MIT",
+  type: "module",
+  exports: {
+    ".": {
+      import: "./dist/index.js",
+      types: "./dist/index.d.ts"
+    }
+  },
+  files: [
+    "dist",
+    "google.script.d.ts",
+    "virtual.d.ts"
+  ],
+  peerDependencies: {
+    "@standard-schema/spec": "^1.0.0",
+    vite: ">=5.0.0",
+    "vite-plugin-singlefile": ">=2.0.0"
+  },
+  devDependencies: {
+    "@standard-schema/spec": "^1.1.0",
+    "@types/node": "^26.1.0",
+    tsup: "^8.5.1",
+    typescript: "^6.0.3",
+    vite: "^8.1.3",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  scripts: {
+    build: "tsup",
+    dev: "tsup --watch"
+  }
+};
+
 // src/plugin/constants.ts
 var VIRTUAL_SERVER_FNS = "virtual:gas/server-fns";
 var VIRTUAL_SERVER_RUNTIME = "virtual:gas/server-runtime";
 var VIRTUAL_CLIENT_RUNTIME = "virtual:gas/client-runtime";
+var PKG_NAME = package_default.name;
 
 // src/plugin/runtimes.ts
 var CLIENT_RUNTIME = `
@@ -567,7 +611,8 @@ function gasClientPlugin() {
     name: "vite-plugin-gasforge:client",
     enforce: "pre",
     resolveId(source) {
-      if (source === "vite-plugin-gasforge") return VIRTUAL_CLIENT_RUNTIME;
+      if (source === PKG_NAME)
+        return VIRTUAL_CLIENT_RUNTIME;
       if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
       return null;
     },
@@ -594,7 +639,7 @@ function gas(options = {}) {
   let root;
   let registry = [];
   return {
-    name: "vite-plugin-gasforge",
+    name: PKG_NAME,
     enforce: "pre",
     configResolved(config) {
       resolvedConfig = config;
@@ -633,7 +678,7 @@ function gas(options = {}) {
       if (source === VIRTUAL_SERVER_FNS) return "\0" + VIRTUAL_SERVER_FNS;
       if (source === VIRTUAL_SERVER_RUNTIME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
-      if (source === "vite-plugin-gasforge")
+      if (source === PKG_NAME)
         return "\0" + VIRTUAL_SERVER_RUNTIME;
       if (source.endsWith("?gas-server")) return source;
       return null;

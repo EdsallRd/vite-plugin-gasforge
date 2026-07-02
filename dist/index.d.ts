@@ -26,7 +26,7 @@ type ServerFn<TInput extends StandardSchemaV1, TOutput extends StandardSchemaV1>
  *
  * @example
  * ```ts
- * import { createServerFn } from "vite-plugin-gasforge";
+ * import { createServerFn } from "@edsallrd/vite-plugin-gasforge";
  * import { z } from "zod";
  *
  * const getGreeting = createServerFn({
