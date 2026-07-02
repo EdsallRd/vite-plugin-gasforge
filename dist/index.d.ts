@@ -1,6 +1,16 @@
 import { PluginOption, BuildOptions, Plugin } from 'vite';
 import { StandardSchemaV1 } from '@standard-schema/spec';
 
+interface GASPluginOptions {
+    server?: string;
+    client?: {
+        entry?: string;
+        plugins?: PluginOption[];
+        rollupOptions?: BuildOptions["rollupOptions"];
+    };
+}
+declare function gas(options?: GASPluginOptions): Plugin;
+
 /**
  * A callable server function with typed input/output.
  * On the client (after build transform), calls google.script.run.
@@ -34,14 +44,5 @@ declare function createServerFn<TInput extends StandardSchemaV1, TOutput extends
     output: TOutput;
     handler: (input: StandardSchemaV1.InferOutput<TInput>) => StandardSchemaV1.InferInput<TOutput>;
 }): ServerFn<TInput, TOutput>;
-interface GASPluginOptions {
-    server?: string;
-    client?: {
-        entry?: string;
-        plugins?: PluginOption[];
-        rollupOptions?: BuildOptions["rollupOptions"];
-    };
-}
-declare function gas(options?: GASPluginOptions): Plugin;
 
 export { type GASPluginOptions, type ServerFn, createServerFn, gas as default };

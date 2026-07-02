@@ -1,6 +1,6 @@
-// src/index.ts
-import { resolve, dirname } from "path";
-import { readdirSync, readFileSync } from "fs";
+// src/plugin/index.ts
+import { resolve as resolve2, dirname } from "path";
+import { readFileSync as readFileSync2 } from "fs";
 import { writeFile } from "fs/promises";
 import {
   build,
@@ -8,7 +8,7 @@ import {
 } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
-// src/transform.ts
+// src/transform/parser.ts
 function scanImports(code) {
   const out = [];
   const len = code.length;
@@ -355,6 +355,8 @@ function findCreateServerFnCalls(code) {
   }
   return matches;
 }
+
+// src/transform/client.ts
 function transformForClient(code) {
   if (!code.includes("createServerFn")) return null;
   const matches = findCreateServerFnCalls(code);
@@ -442,6 +444,8 @@ function stripUnusedImports(code) {
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// src/transform/server.ts
 function extractForServer(code) {
   if (!code.includes("createServerFn")) return null;
   const matches = findCreateServerFnCalls(code);
@@ -474,39 +478,9 @@ function getServerFnNames(code) {
   return findCreateServerFnCalls(code).map((m) => m.name);
 }
 
-// src/index.ts
-function createServerFn(def) {
-  const fn = async (...args) => def.handler(args[0]);
-  return fn;
-}
-var CLIENT_RUNTIME = `
-async function __validate(schema, value) {
-  const result = await schema["~standard"].validate(value);
-  if ("issues" in result && result.issues) {
-    throw new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
-  }
-  return result.value;
-}
-
-export function createServerFn(def) {
-  return async (...args) => {
-    const input = args[0];
-    const validated = await __validate(def.input, input);
-    return new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(async (raw) => {
-          try {
-            const result = typeof raw === "string" ? JSON.parse(raw) : raw;
-            resolve(await __validate(def.output, result));
-          }
-          catch (err) { reject(err); }
-        })
-        .withFailureHandler(reject)
-        [def.__name](JSON.stringify(validated ?? null));
-    });
-  };
-}
-`;
+// src/scanner.ts
+import { resolve } from "path";
+import { readdirSync, readFileSync } from "fs";
 function scanAllFiles(dir) {
   const results = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -542,9 +516,41 @@ function buildRegistry(srcDir) {
   }
   return registry;
 }
+
+// src/plugin/constants.ts
 var VIRTUAL_SERVER_FNS = "virtual:gas/server-fns";
 var VIRTUAL_SERVER_RUNTIME = "virtual:gas/server-runtime";
 var VIRTUAL_CLIENT_RUNTIME = "virtual:gas/client-runtime";
+
+// src/plugin/runtimes.ts
+var CLIENT_RUNTIME = `
+async function __validate(schema, value) {
+  const result = await schema["~standard"].validate(value);
+  if ("issues" in result && result.issues) {
+    throw new Error("Validation failed: " + result.issues.map(i => i.message).join(", "));
+  }
+  return result.value;
+}
+
+export function createServerFn(def) {
+  return async (...args) => {
+    const input = args[0];
+    const validated = await __validate(def.input, input);
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(async (raw) => {
+          try {
+            const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+            resolve(await __validate(def.output, result));
+          }
+          catch (err) { reject(err); }
+        })
+        .withFailureHandler(reject)
+        [def.__name](JSON.stringify(validated ?? null));
+    });
+  };
+}
+`;
 var SERVER_RUNTIME = `
 export function createServerFn(def) {
   return async (...args) => {
@@ -554,6 +560,31 @@ export function createServerFn(def) {
   };
 }
 `;
+
+// src/plugin/client.ts
+function gasClientPlugin() {
+  return {
+    name: "vite-plugin-gasforge:client",
+    enforce: "pre",
+    resolveId(source) {
+      if (source === "vite-plugin-gasforge") return VIRTUAL_CLIENT_RUNTIME;
+      if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
+      return null;
+    },
+    load(id) {
+      if (id === VIRTUAL_CLIENT_RUNTIME) return CLIENT_RUNTIME;
+      return null;
+    },
+    // Transform source files: strip handler, inject __name
+    transform(code, id) {
+      const cleanId = id.split("?")[0];
+      if (!/\.(ts|tsx|js|jsx)$/.test(cleanId)) return null;
+      return transformForClient(code);
+    }
+  };
+}
+
+// src/plugin/index.ts
 function gas(options = {}) {
   const serverEntry = options.server ?? "src/server/index.ts";
   const clientEntry = options.client?.entry ?? "src/client/index.html";
@@ -568,7 +599,7 @@ function gas(options = {}) {
     configResolved(config) {
       resolvedConfig = config;
       root = config.root;
-      registry = buildRegistry(resolve(root, "src"));
+      registry = buildRegistry(resolve2(root, "src"));
       if (registry.length > 0) {
         console.log(
           `vite-plugin-gasforge: ${registry.length} server function(s) \u2014 ${registry.map((f) => f.name).join(", ")}`
@@ -629,7 +660,7 @@ function gas(options = {}) {
       }
       if (id.endsWith("?gas-server")) {
         const realPath = id.replace(/\?gas-server$/, "");
-        const code = readFileSync(realPath, "utf-8");
+        const code = readFileSync2(realPath, "utf-8");
         const extracted = extractForServer(code);
         return extracted ?? "";
       }
@@ -637,20 +668,20 @@ function gas(options = {}) {
     },
     watchChange(id) {
       if (/\.(ts|tsx)$/.test(id) && !id.endsWith(".gen.ts")) {
-        const code = readFileSync(id, "utf-8");
+        const code = readFileSync2(id, "utf-8");
         if (code.includes("createServerFn")) {
           console.log(
             "vite-plugin-gasforge: server function changed, re-scanning..."
           );
-          registry = buildRegistry(resolve(root, "src"));
+          registry = buildRegistry(resolve2(root, "src"));
         }
       }
     },
     // Client build
     async closeBundle() {
       console.log("vite-plugin-gasforge: building client bundle...");
-      const clientDir = resolve(root, dirname(clientEntry));
-      const distDir = resolvedConfig.build.outDir ? resolve(root, resolvedConfig.build.outDir) : resolve(root, "dist");
+      const clientDir = resolve2(root, dirname(clientEntry));
+      const distDir = resolvedConfig.build.outDir ? resolve2(root, resolvedConfig.build.outDir) : resolve2(root, "dist");
       const clientConfig = defineConfig({
         plugins: [
           gasClientPlugin(),
@@ -665,7 +696,7 @@ function gas(options = {}) {
           rollupOptions: {
             ...clientRollupOptions,
             output: { format: "esm" },
-            input: resolve(root, clientEntry)
+            input: resolve2(root, clientEntry)
           }
         },
         resolve: {
@@ -679,7 +710,7 @@ function gas(options = {}) {
         (o) => o.type === "asset" && o.fileName.endsWith(".html")
       );
       if (html?.source) {
-        await writeFile(resolve(distDir, "Client.html"), html.source, "utf-8");
+        await writeFile(resolve2(distDir, "Client.html"), html.source, "utf-8");
       } else {
         throw new Error(
           "vite-plugin-gasforge: no HTML asset found in client build output"
@@ -688,28 +719,16 @@ function gas(options = {}) {
     }
   };
 }
-function gasClientPlugin() {
-  return {
-    name: "vite-plugin-gasforge:client",
-    enforce: "pre",
-    resolveId(source) {
-      if (source === "vite-plugin-gasforge") return VIRTUAL_CLIENT_RUNTIME;
-      if (source === VIRTUAL_CLIENT_RUNTIME) return VIRTUAL_CLIENT_RUNTIME;
-      return null;
-    },
-    load(id) {
-      if (id === VIRTUAL_CLIENT_RUNTIME) return CLIENT_RUNTIME;
-      return null;
-    },
-    // Transform source files: strip handler, inject __name
-    transform(code, id) {
-      const cleanId = id.split("?")[0];
-      if (!/\.(ts|tsx|js|jsx)$/.test(cleanId)) return null;
-      return transformForClient(code);
-    }
-  };
+
+// src/server-fn.ts
+function createServerFn(def) {
+  const fn = async (...args) => def.handler(args[0]);
+  return fn;
 }
+
+// src/index.ts
+var src_default = gas;
 export {
   createServerFn,
-  gas as default
+  src_default as default
 };

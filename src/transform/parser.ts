@@ -1,19 +1,7 @@
 /**
- * Code transforms for vite-plugin-gasforge.
- *
- * Client transform: strips `handler` from createServerFn calls, injects `__name`,
- * and removes imports that become unused after handler removal.
- *
- * Server extraction: given a file with createServerFn calls mixed with React code,
- * extracts only the imports + createServerFn definitions for the server build.
- */
-
-// ── Utilities ───────────────────────────────────────────────────────────────
-
-/**
  * Information about a single top-level `import` statement.
  */
-interface ImportInfo {
+export interface ImportInfo {
   /** The full statement text, including newlines if multi-line. */
   text: string;
   /** Byte offset of the `i` in `import`. */
@@ -39,7 +27,7 @@ interface ImportInfo {
  * (with escape handling), line comments, and block comments. Filters out
  * `import.meta`, dynamic `import(...)`, and substrings inside identifiers.
  */
-function scanImports(code: string): ImportInfo[] {
+export function scanImports(code: string): ImportInfo[] {
   const out: ImportInfo[] = [];
   const len = code.length;
   let i = 0;
@@ -141,7 +129,7 @@ function scanImports(code: string): ImportInfo[] {
  * Parse a single import statement starting at `start` (where `code[start..start+6] === "import"`).
  * Returns the parsed info, or null if the statement could not be parsed.
  */
-function parseImportFrom(code: string, start: number): ImportInfo | null {
+export function parseImportFrom(code: string, start: number): ImportInfo | null {
   const len = code.length;
   let i = start + 6; // past `import`
   let isTypeOnly = false;
@@ -295,7 +283,7 @@ function parseImportFrom(code: string, start: number): ImportInfo | null {
  * Consume a quoted string literal starting at `code[start]`.
  * Returns the index just past the closing quote, or -1 if not closed.
  */
-function consumeStringLiteral(code: string, start: number): number {
+export function consumeStringLiteral(code: string, start: number): number {
   const quote = code[start];
   if (quote !== '"' && quote !== "'") return -1;
   let i = start + 1;
@@ -313,7 +301,7 @@ function consumeStringLiteral(code: string, start: number): number {
 /**
  * Find the index of the `}` matching the `{` at `start`. String/comment-aware.
  */
-function findMatchingBrace(code: string, start: number): number {
+export function findMatchingBrace(code: string, start: number): number {
   if (code[start] !== "{") return -1;
   let depth = 1;
   let i = start + 1;
@@ -359,7 +347,7 @@ function findMatchingBrace(code: string, start: number): number {
 /**
  * Consume an identifier starting at `start`. Returns null if no identifier.
  */
-function consumeIdentifier(
+export function consumeIdentifier(
   code: string,
   start: number,
 ): { name: string; end: number } | null {
@@ -374,7 +362,7 @@ function consumeIdentifier(
  * For each binding, push the local name (post-`as`) onto `out`.
  * Strips any leading `type ` (mixed type/value imports — erased at runtime).
  */
-function parseNamedBindings(inner: string, out: string[]): void {
+export function parseNamedBindings(inner: string, out: string[]): void {
   for (const raw of inner.split(",")) {
     let token = raw.trim();
     if (!token) continue;
@@ -390,7 +378,7 @@ function parseNamedBindings(inner: string, out: string[]): void {
  * Starting from `startIndex`, find where a JS value ends at nesting depth 0.
  * Returns the index of the terminating `,` or `}` (not consumed).
  */
-function findValueEnd(code: string, startIndex: number): number {
+export function findValueEnd(code: string, startIndex: number): number {
   let depth = 0;
   let i = startIndex;
   let inString: string | null = null;
@@ -448,14 +436,14 @@ function findValueEnd(code: string, startIndex: number): number {
  * Returns array of { name, callStart, callEnd } where callStart..callEnd
  * spans the full `createServerFn({...})` expression.
  */
-interface ServerFnMatch {
+export interface ServerFnMatch {
   name: string;
   declStart: number;
   callStart: number;
   callEnd: number;
 }
 
-function findCreateServerFnCalls(code: string): ServerFnMatch[] {
+export function findCreateServerFnCalls(code: string): ServerFnMatch[] {
   const pattern =
     /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*createServerFn\s*\(/g;
   const matches: ServerFnMatch[] = [];
@@ -497,219 +485,4 @@ function findCreateServerFnCalls(code: string): ServerFnMatch[] {
   }
 
   return matches;
-}
-
-// ── Client transform ────────────────────────────────────────────────────────
-
-/**
- * Transform a source file for the client build:
- * 1. Inject `__name: "varName"` into each createServerFn argument
- * 2. Strip the `handler` property (and its value) from each call
- * 3. Remove imports that become unused after handler removal
- */
-export function transformForClient(code: string): string | null {
-  if (!code.includes("createServerFn")) return null;
-
-  const matches = findCreateServerFnCalls(code);
-  if (matches.length === 0) return null;
-
-  // Work backwards so indices remain valid
-  let result = code;
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const { name, callStart, callEnd } = matches[i];
-
-    // Extract the content between createServerFn( and )
-    const inner = result.slice(callStart + 1, callEnd - 1);
-
-    // Strip handler property
-    const stripped = stripHandlerProperty(inner);
-
-    // Inject __name after the first {
-    const braceIdx = stripped.indexOf("{");
-    if (braceIdx === -1) continue;
-
-    const injected =
-      stripped.slice(0, braceIdx + 1) +
-      ` __name: "${name}",` +
-      stripped.slice(braceIdx + 1);
-
-    result =
-      result.slice(0, callStart + 1) + injected + result.slice(callEnd - 1);
-  }
-
-  // Strip imports that became unused after handler removal
-  result = stripUnusedImports(result);
-
-  return result;
-}
-
-/**
- * Remove the `handler: <value>` property from an object literal string.
- */
-function stripHandlerProperty(objectStr: string): string {
-  // Match `handler` as a property key (word boundary to avoid matching in strings)
-  const handlerPattern = /\bhandler\s*:\s*/g;
-  let m: RegExpExecArray | null;
-
-  while ((m = handlerPattern.exec(objectStr)) !== null) {
-    const valueStart = m.index + m[0].length;
-    const valueEnd = findValueEnd(objectStr, valueStart);
-
-    // Determine removal range
-    let removeStart = m.index;
-    let removeEnd = valueEnd;
-
-    // Include trailing comma and whitespace
-    if (objectStr[removeEnd] === ",") {
-      removeEnd++;
-      // Skip whitespace/newlines after comma
-      while (removeEnd < objectStr.length && /\s/.test(objectStr[removeEnd])) {
-        removeEnd++;
-      }
-    }
-
-    // Remove preceding comma + whitespace if handler isn't the first property
-    const before = objectStr.slice(0, removeStart);
-    const lastComma = before.lastIndexOf(",");
-    if (lastComma !== -1) {
-      const between = before.slice(lastComma + 1);
-      if (between.trim() === "") {
-        removeStart = lastComma;
-      }
-    }
-
-    return objectStr.slice(0, removeStart) + objectStr.slice(removeEnd);
-  }
-
-  return objectStr;
-}
-
-/**
- * Remove import statements where none of the imported names appear
- * in the rest of the code (outside of import statements).
- *
- * Multi-line imports are handled correctly by character-level scanning.
- * Output for kept regions is byte-identical to the input.
- */
-function stripUnusedImports(code: string): string {
-  const importInfos = scanImports(code);
-  if (importInfos.length === 0) return code;
-
-  // Build "non-import code" by stitching together everything OUTSIDE the
-  // import ranges. Replace each import range with whitespace of equal byte
-  // length so character offsets in the rest of the code are preserved (not
-  // strictly required, but keeps line-based regex tests behaving naturally).
-  let nonImportCode = "";
-  let cursor = 0;
-  for (const info of importInfos) {
-    nonImportCode += code.slice(cursor, info.start);
-    cursor = info.end;
-  }
-  nonImportCode += code.slice(cursor);
-
-  const keep: boolean[] = importInfos.map((info) => {
-    if (info.isTypeOnly) return true;
-    if (info.isSideEffect) return true;
-
-    const candidates: string[] = [];
-    if (info.defaultName) candidates.push(info.defaultName);
-    if (info.namespaceName) candidates.push(info.namespaceName);
-    for (const n of info.namedBindings) candidates.push(n);
-
-    if (candidates.length === 0) return true;
-
-    return candidates.some((name) =>
-      new RegExp(`\\b${escapeRegex(name)}\\b`).test(nonImportCode),
-    );
-  });
-
-  // Stitch the output together: drop unkept import ranges, leave everything
-  // else byte-identical. Also collapse a single trailing newline immediately
-  // after a removed import so we don't leave behind blank lines.
-  let out = "";
-  cursor = 0;
-  for (let idx = 0; idx < importInfos.length; idx++) {
-    const info = importInfos[idx];
-    out += code.slice(cursor, info.start);
-    if (keep[idx]) {
-      out += info.text;
-    } else {
-      // Skip the import. Also consume one trailing newline (\n or \r\n) to
-      // avoid leaving an empty line behind.
-      let after = info.end;
-      if (code[after] === "\r" && code[after + 1] === "\n") after += 2;
-      else if (code[after] === "\n") after += 1;
-      cursor = after;
-      continue;
-    }
-    cursor = info.end;
-  }
-  out += code.slice(cursor);
-  return out;
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// ── Server extraction ───────────────────────────────────────────────────────
-
-/**
- * Given a source file that may contain React components + createServerFn calls,
- * extract only the parts needed for the server build:
- * - All import statements (unused ones will be tree-shaken by Rollup)
- * - All createServerFn variable declarations
- * - Export statements for the extracted functions
- */
-export function extractForServer(code: string): string | null {
-  if (!code.includes("createServerFn")) return null;
-
-  const matches = findCreateServerFnCalls(code);
-  if (matches.length === 0) return null;
-
-  // Collect all complete `import` statements (incl. multi-line ones).
-  // Character-level scan handles strings/comments and multi-line bindings.
-  const imports = scanImports(code).map((info) => info.text);
-
-  // Extract each createServerFn declaration (from declaration start to the `;` after callEnd)
-  const declarations: string[] = [];
-  const names: string[] = [];
-
-  for (const match of matches) {
-    names.push(match.name);
-    // Find the end of the statement (the ; or newline after callEnd)
-    let stmtEnd = match.callEnd;
-    while (
-      stmtEnd < code.length &&
-      code[stmtEnd] !== ";" &&
-      code[stmtEnd] !== "\n"
-    ) {
-      stmtEnd++;
-    }
-    if (code[stmtEnd] === ";") stmtEnd++;
-
-    let decl = code.slice(match.declStart, stmtEnd).trim();
-    // Remove `export` if present — we'll add our own export statement
-    decl = decl.replace(/^export\s+/, "");
-    declarations.push(decl);
-  }
-
-  // Build extracted module
-  const parts = [
-    ...imports,
-    "",
-    ...declarations,
-    "",
-    `export { ${names.join(", ")} };`,
-    "",
-  ];
-
-  return parts.join("\n");
-}
-
-/**
- * Scan a source string and return the names of all createServerFn calls.
- */
-export function getServerFnNames(code: string): string[] {
-  return findCreateServerFnCalls(code).map((m) => m.name);
 }
