@@ -1,5 +1,5 @@
 {
-  "name": "vite-plugin-gasforge",
+  "name": "@edsallrd/vite-plugin-gasforge",
   "version": "0.2.2",
   "description": "A Vite plugin for building Google Apps Script projects with type-safe server functions.",
   "author": "Edsall Park <https://github.com/EdsallRd>",

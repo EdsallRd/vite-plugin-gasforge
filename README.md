@@ -132,28 +132,9 @@ dist/
 
 ## Plugin options
 
-| Option                   | Type             | Default                   | Description                                  |
-| ------------------------ | ---------------- | ------------------------- | -------------------------------------------- |
-| `server`                 | `string`         | `"src/server/index.ts"`   | Server entry file path                       |
-| `client.entry`           | `string`         | `"src/client/index.html"` | Client entry file path                       |
-| `client.plugins`         | `PluginOption[]` | `[]`                      | Additional Vite plugins for the client build |
-| `client.rollupOptions`   | `object`         | `{}`                      | Rollup options for the client build          |
-
-## Working in Yggdrasil
-
-This package lives in the `Yggdrasil` meta-repo at `packages/vite-plugin-gasforge`. Sibling apps consume it via `workspace:*`:
-
-```jsonc
-{
-  "devDependencies": {
-    "vite-plugin-gasforge": "workspace:*"
-  }
-}
-```
-
-Develop with watch mode or one-shot build from the meta-repo root:
-
-```bash
-pnpm --filter vite-plugin-gasforge dev    # tsup watch
-pnpm --filter vite-plugin-gasforge build  # one-shot
-```
+| Option                 | Type             | Default                   | Description                                  |
+| ---------------------- | ---------------- | ------------------------- | -------------------------------------------- |
+| `server`               | `string`         | `"src/server/index.ts"`   | Server entry file path                       |
+| `client.entry`         | `string`         | `"src/client/index.html"` | Client entry file path                       |
+| `client.plugins`       | `PluginOption[]` | `[]`                      | Additional Vite plugins for the client build |
+| `client.rollupOptions` | `object`         | `{}`                      | Rollup options for the client build          |

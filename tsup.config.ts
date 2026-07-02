@@ -7,9 +7,5 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
-  external: [
-    "vite",
-    "vite-plugin-singlefile",
-    "@standard-schema/spec",
-  ],
+  external: ["vite", "vite-plugin-singlefile", "@standard-schema/spec"],
 });

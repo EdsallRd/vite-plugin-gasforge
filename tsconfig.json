@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -10,5 +11,8 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src", "google.script.d.ts"]
+  "include": [
+    "src",
+    "google.script.d.ts"
+  ]
 }
