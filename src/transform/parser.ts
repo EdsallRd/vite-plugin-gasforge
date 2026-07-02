@@ -432,9 +432,9 @@ export function findValueEnd(code: string, startIndex: number): number {
 }
 
 /**
- * Find all `const/let/var/export const VARNAME = createServerFn(` occurrences.
- * Returns array of { name, callStart, callEnd } where callStart..callEnd
- * spans the full `createServerFn({...})` expression.
+ * Find all `const/let/var/export const VARNAME = createServerFn(` occurrences,
+ * supporting TypeScript generics (`createServerFn<I, O>(...)`) and explicit type annotations.
+ * Returns array of { name, declStart, callStart, callEnd }.
  */
 export interface ServerFnMatch {
   name: string;
@@ -444,19 +444,45 @@ export interface ServerFnMatch {
 }
 
 export function findCreateServerFnCalls(code: string): ServerFnMatch[] {
+  // Pattern matches `var/let/const name = createServerFn` or `name: Type = createServerFn`
   const pattern =
-    /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*createServerFn\s*\(/g;
+    /(?:export\s+)?(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*createServerFn\b/g;
   const matches: ServerFnMatch[] = [];
 
   let m: RegExpExecArray | null;
   while ((m = pattern.exec(code)) !== null) {
     const name = m[1];
     const declStart = m.index;
-    // Find the opening paren of createServerFn(
-    const parenOpen = m.index + m[0].length - 1;
-    // Count parens to find the matching close
+    let i = m.index + m[0].length;
+
+    // Skip optional whitespace/comments
+    while (i < code.length && /\s/.test(code[i])) i++;
+
+    // Skip TS generics <...> if present
+    if (code[i] === "<") {
+      let gDepth = 1;
+      i++;
+      let inStr: string | null = null;
+      while (i < code.length && gDepth > 0) {
+        const ch = code[i];
+        if (inStr) {
+          if (ch === inStr && code[i - 1] !== "\\") inStr = null;
+        } else if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+        } else if (ch === "<") {
+          gDepth++;
+        } else if (ch === ">") {
+          gDepth--;
+        }
+        i++;
+      }
+      while (i < code.length && /\s/.test(code[i])) i++;
+    }
+
+    if (code[i] !== "(") continue;
+    const parenOpen = i;
     let depth = 1;
-    let i = parenOpen + 1;
+    i++;
     let inStr: string | null = null;
 
     while (i < code.length && depth > 0) {

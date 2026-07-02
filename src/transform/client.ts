@@ -1,5 +1,6 @@
 import {
   findCreateServerFnCalls,
+  findMatchingBrace,
   findValueEnd,
   scanImports,
 } from "./parser";
@@ -47,25 +48,48 @@ export function transformForClient(code: string): string | null {
 }
 
 /**
- * Remove the `handler: <value>` property from an object literal string.
+ * Remove the `handler` property (supporting `handler: <value>` and method shorthands) from an object literal string.
  */
 function stripHandlerProperty(objectStr: string): string {
-  // Match `handler` as a property key (word boundary to avoid matching in strings)
-  const handlerPattern = /\bhandler\s*:\s*/g;
+  const handlerPattern = /(?:async\s+)?\bhandler\s*(?::|\()/g;
   let m: RegExpExecArray | null;
 
   while ((m = handlerPattern.exec(objectStr)) !== null) {
-    const valueStart = m.index + m[0].length;
-    const valueEnd = findValueEnd(objectStr, valueStart);
-
-    // Determine removal range
     let removeStart = m.index;
-    let removeEnd = valueEnd;
+    let removeEnd: number;
+
+    const matched = m[0];
+    if (matched.endsWith(":")) {
+      const valueStart = m.index + matched.length;
+      removeEnd = findValueEnd(objectStr, valueStart);
+    } else {
+      // Method shorthand: handler(...) { ... } or async handler(...) { ... }
+      const parenOpen = m.index + matched.length - 1;
+      let depth = 1;
+      let i = parenOpen + 1;
+      let inStr: string | null = null;
+      while (i < objectStr.length && depth > 0) {
+        const ch = objectStr[i];
+        if (inStr) {
+          if (ch === inStr && objectStr[i - 1] !== "\\") inStr = null;
+        } else if (ch === '"' || ch === "'" || ch === "`") {
+          inStr = ch;
+        } else if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        i++;
+      }
+      while (i < objectStr.length && objectStr[i] !== "{") i++;
+      if (i < objectStr.length && objectStr[i] === "{") {
+        const braceClose = findMatchingBrace(objectStr, i);
+        removeEnd = braceClose === -1 ? objectStr.length : braceClose + 1;
+      } else {
+        removeEnd = i;
+      }
+    }
 
     // Include trailing comma and whitespace
     if (objectStr[removeEnd] === ",") {
       removeEnd++;
-      // Skip whitespace/newlines after comma
       while (removeEnd < objectStr.length && /\s/.test(objectStr[removeEnd])) {
         removeEnd++;
       }
