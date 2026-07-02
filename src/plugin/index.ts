@@ -56,7 +56,11 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
     // Server build configuration (IIFE for GAS)
     config() {
       return {
+        define: {
+          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "production"),
+        },
         build: {
+          target: "es2020",
           minify: false,
           lib: {
             entry: serverEntry,
