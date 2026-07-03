@@ -69,7 +69,7 @@ export function createServerFn<
         input,
         "INPUT_VALIDATION_FAILED",
       );
-      const serializedInput = superjson.stringify(validated ?? null);
+      const serializedInput = superjson.stringify(validated);
 
       return new Promise((resolve, reject) => {
         google.script.run
@@ -149,7 +149,7 @@ export function createServerFn<
         result,
         "OUTPUT_VALIDATION_FAILED",
       );
-      return JSON.stringify(superjson.serialize(validatedOutput ?? null));
+      return JSON.stringify(superjson.serialize(validatedOutput));
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const errorObj = {

@@ -851,7 +851,7 @@ function createServerFn(def) {
         input,
         "INPUT_VALIDATION_FAILED"
       );
-      const serializedInput = superjson.stringify(validated ?? null);
+      const serializedInput = superjson.stringify(validated);
       return new Promise((resolve4, reject) => {
         google.script.run.withSuccessHandler(async (raw) => {
           try {
@@ -916,7 +916,7 @@ function createServerFn(def) {
         result,
         "OUTPUT_VALIDATION_FAILED"
       );
-      return JSON.stringify(superjson.serialize(validatedOutput ?? null));
+      return JSON.stringify(superjson.serialize(validatedOutput));
     } catch (err) {
       const errorObj = {
         __gas_error: true,

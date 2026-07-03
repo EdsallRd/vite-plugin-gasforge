@@ -50,4 +50,41 @@ describe("Runtime execution, middleware, and query extensions", () => {
     expect(err.name).toBe("GASForgeError");
     expect(err.code).toBe("UNAUTHORIZED");
   });
+
+  it("should handle void (undefined) schema inputs and outputs without coercing to null", async () => {
+    const voidSchema = {
+      "~standard": {
+        version: 1 as const,
+        vendor: "test",
+        validate: (val: unknown) => {
+          if (val !== undefined) {
+            return {
+              issues: [
+                {
+                  message: `expected void, received ${val === null ? "null" : typeof val}`,
+                },
+              ],
+            };
+          }
+          return { value: undefined };
+        },
+      },
+    };
+
+    const getVoid = createServerFn({
+      input: voidSchema as any,
+      output: voidSchema as any,
+      handler: async () => {
+        return undefined;
+      },
+    });
+
+    const rawRes = await getVoid(undefined);
+    expect(typeof rawRes).toBe("string");
+    const parsed = JSON.parse(rawRes);
+    expect(parsed.__gas_error).toBeUndefined();
+    const res = superjson.deserialize(parsed);
+    expect(res).toBeUndefined();
+  });
 });
+
