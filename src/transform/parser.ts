@@ -136,7 +136,6 @@ export function parseImportFrom(code: string, start: number): ImportInfo | null 
   let defaultName: string | undefined;
   let namespaceName: string | undefined;
   const namedBindings: string[] = [];
-  let sawClause = false;
 
   // Advance past whitespace/comments helper
   const skipWs = () => {
@@ -197,7 +196,6 @@ export function parseImportFrom(code: string, start: number): ImportInfo | null 
     const inner = code.slice(i + 1, closeIdx);
     parseNamedBindings(inner, namedBindings);
     i = closeIdx + 1;
-    sawClause = true;
   } else if (code[i] === "*") {
     i++;
     skipWs();
@@ -208,7 +206,6 @@ export function parseImportFrom(code: string, start: number): ImportInfo | null 
       if (!id) return null;
       namespaceName = id.name;
       i = id.end;
-      sawClause = true;
     } else {
       return null;
     }
@@ -218,7 +215,6 @@ export function parseImportFrom(code: string, start: number): ImportInfo | null 
     if (!id) return null;
     defaultName = id.name;
     i = id.end;
-    sawClause = true;
 
     skipWs();
     if (code[i] === ",") {
@@ -249,7 +245,6 @@ export function parseImportFrom(code: string, start: number): ImportInfo | null 
     }
   }
 
-  if (!sawClause) return null;
 
   skipWs();
 

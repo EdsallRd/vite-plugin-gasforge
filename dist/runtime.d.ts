@@ -9,7 +9,7 @@ interface Middleware<TNextCtx = any> {
 /**
  * Helper type to infer the combined context produced by an array of middlewares.
  */
-type InferMiddlewareContext<TMiddlewares extends ReadonlyArray<Middleware<any>>> = TMiddlewares extends readonly [Middleware<infer C1>, ...infer Rest] ? Rest extends readonly Middleware<any>[] ? C1 & InferMiddlewareContext<Rest> : C1 : Record<string, never>;
+type InferMiddlewareContext<TMiddlewares extends readonly Middleware<any>[]> = TMiddlewares extends readonly [Middleware<infer C1>, ...infer Rest] ? Rest extends readonly Middleware<any>[] ? C1 & InferMiddlewareContext<Rest> : C1 : Record<string, never>;
 /**
  * Create a middleware that can be attached to `createServerFn`.
  *
@@ -42,8 +42,8 @@ interface ServerFnQueryExtensions<TInput extends StandardSchemaV1, TOutput exten
 type GASForgeErrorCode = "INPUT_VALIDATION_FAILED" | "OUTPUT_VALIDATION_FAILED" | "MIDDLEWARE_ERROR" | "SERVER_ERROR" | "RPC_ERROR";
 declare class GASForgeError extends Error {
     readonly code: GASForgeErrorCode;
-    readonly issues?: ReadonlyArray<StandardSchemaV1.Issue>;
-    constructor(code: GASForgeErrorCode, message: string, issues?: ReadonlyArray<StandardSchemaV1.Issue>);
+    readonly issues?: readonly StandardSchemaV1.Issue[];
+    constructor(code: GASForgeErrorCode, message: string, issues?: readonly StandardSchemaV1.Issue[]);
 }
 
 /**
@@ -53,7 +53,7 @@ type ServerFn<TInput extends StandardSchemaV1, TOutput extends StandardSchemaV1>
 /**
  * Define a server function that can be called from client code.
  */
-declare function createServerFn<TInput extends StandardSchemaV1, TOutput extends StandardSchemaV1, TMiddlewares extends ReadonlyArray<Middleware<any>> = []>(def: {
+declare function createServerFn<TInput extends StandardSchemaV1, TOutput extends StandardSchemaV1, TMiddlewares extends readonly Middleware<any>[] = []>(def: {
     middleware?: TMiddlewares;
     input: TInput;
     output: TOutput;

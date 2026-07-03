@@ -1,23 +1,24 @@
 import { describe, it, expect } from "vitest";
 import superjson from "superjson";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createServerFn, createMiddleware, GASForgeError } from "../src";
 
 describe("Runtime execution, middleware, and query extensions", () => {
   it("should execute middleware chain and pass merged context to handler", async () => {
-    const authMw = createMiddleware().handler(async () => {
+    const authMw = createMiddleware().handler(() => {
       return { userId: "user-123" };
     });
 
-    const roleMw = createMiddleware().handler(async (ctx) => {
+    const roleMw = createMiddleware().handler((ctx) => {
       expect(ctx.userId).toBe("user-123");
       return { role: "admin" };
     });
 
     const getUserInfo = createServerFn({
       middleware: [authMw, roleMw],
-      input: {} as any,
-      output: {} as any,
-      handler: async (input, ctx) => {
+      input: {} as unknown as StandardSchemaV1,
+      output: {} as unknown as StandardSchemaV1,
+      handler: (input, ctx) => {
         expect(ctx.userId).toBe("user-123");
         expect(ctx.role).toBe("admin");
         return { success: true, user: ctx.userId };
@@ -25,17 +26,17 @@ describe("Runtime execution, middleware, and query extensions", () => {
     });
 
     const rawRes = await getUserInfo(undefined);
-    const parsed = typeof rawRes === "string" ? JSON.parse(rawRes) : rawRes;
-    const res = superjson.deserialize(parsed);
+    const parsed = (typeof rawRes === "string" ? JSON.parse(rawRes) : rawRes) as Record<string, unknown>;
+    const res = superjson.deserialize(parsed as Parameters<typeof superjson.deserialize>[0]);
     expect(res).toEqual({ success: true, user: "user-123" });
   });
 
   it("should generate TanStack queryOptions and queryKey", () => {
     const getGreeting = createServerFn({
       __name: "getGreeting",
-      input: {} as any,
-      output: {} as any,
-      handler: async (name: string) => `Hello, ${name}`,
+      input: {} as unknown as StandardSchemaV1,
+      output: {} as unknown as StandardSchemaV1,
+      handler: (name: string) => `Hello, ${name}`,
     });
 
     expect(getGreeting.queryKey("Alice")).toEqual(["getGreeting", "Alice"]);
@@ -45,10 +46,10 @@ describe("Runtime execution, middleware, and query extensions", () => {
   });
 
   it("should instantiate GASForgeError properly", () => {
-    const err = new GASForgeError("UNAUTHORIZED" as any, "Not allowed");
+    const err = new GASForgeError("RPC_ERROR", "Not allowed");
     expect(err instanceof Error).toBe(true);
     expect(err.name).toBe("GASForgeError");
-    expect(err.code).toBe("UNAUTHORIZED");
+    expect(err.code).toBe("RPC_ERROR");
   });
 
   it("should handle void (undefined) schema inputs and outputs without coercing to null", async () => {
@@ -72,23 +73,23 @@ describe("Runtime execution, middleware, and query extensions", () => {
     };
 
     const getVoid = createServerFn({
-      input: voidSchema as any,
-      output: voidSchema as any,
-      handler: async () => {
+      input: voidSchema,
+      output: voidSchema,
+      handler: () => {
         return undefined;
       },
     });
 
     const rawRes = await getVoid(undefined);
     expect(typeof rawRes).toBe("string");
-    const parsed = JSON.parse(rawRes);
+    const parsed = JSON.parse(rawRes) as Record<string, unknown>;
     expect(parsed.__gas_error).toBeUndefined();
-    const res = superjson.deserialize(parsed);
+    const res = superjson.deserialize(parsed as Parameters<typeof superjson.deserialize>[0]);
     expect(res).toBeUndefined();
   });
 
   it("should execute .local bypassed call directly on the server without serialization", async () => {
-    const authMw = createMiddleware().handler(async () => {
+    const authMw = createMiddleware().handler(() => {
       return { userId: "user-123" };
     });
 
@@ -98,17 +99,17 @@ describe("Runtime execution, middleware, and query extensions", () => {
         "~standard": {
           version: 1,
           vendor: "test",
-          validate: (val: any) => ({ value: val }),
+          validate: (val: unknown) => ({ value: val }),
         },
-      } as any,
+      },
       output: {
         "~standard": {
           version: 1,
           vendor: "test",
-          validate: (val: any) => ({ value: val }),
+          validate: (val: unknown) => ({ value: val }),
         },
-      } as any,
-      handler: async (num: number, ctx) => {
+      },
+      handler: (num: number, ctx) => {
         expect(ctx.userId).toBe("user-123");
         return num * 2;
       },
@@ -119,20 +120,20 @@ describe("Runtime execution, middleware, and query extensions", () => {
   });
 
   it("should throw GASForgeError when target function is missing on google.script.run", async () => {
-    const defObj: any = {
+    const defObj = {
       __name: "missingFunction",
-      input: {} as any,
-      output: {} as any,
-      handler: async () => "result",
+      input: {} as unknown as StandardSchemaV1,
+      output: {} as unknown as StandardSchemaV1,
+      handler: () => "result",
     };
     const testFn = createServerFn(defObj);
 
     // Simulate client-side transform by deleting handler from definition object
-    delete defObj.handler;
+    delete (defObj as Partial<typeof defObj>).handler;
 
     // Mock google global environment
-    const originalGoogle = (globalThis as any).google;
-    (globalThis as any).google = {
+    const originalGoogle = (globalThis as unknown as { google: unknown }).google;
+    (globalThis as unknown as { google: unknown }).google = {
       script: {
         run: {
           withSuccessHandler() {
@@ -151,8 +152,7 @@ describe("Runtime execution, middleware, and query extensions", () => {
       );
     } finally {
       // Restore
-      (globalThis as any).google = originalGoogle;
+      (globalThis as unknown as { google: unknown }).google = originalGoogle;
     }
   });
 });
-

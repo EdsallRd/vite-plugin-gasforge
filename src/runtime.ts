@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import superjson from "superjson";
-import { GASForgeError } from "./errors";
+import { GASForgeError, type GASForgeErrorCode } from "./errors";
 import type { Middleware, InferMiddlewareContext } from "./middleware";
 import type { ServerFnQueryExtensions } from "./query";
 
@@ -33,15 +33,19 @@ export type ServerFn<
 ) => Promise<StandardSchemaV1.InferOutput<TOutput>>) &
   ServerFnQueryExtensions<TInput, TOutput>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function __validate(schema: any, value: any, errorCode: string): Promise<any> {
-  if (!schema?.["~standard"]) return value;
+async function __validate<TSchema extends StandardSchemaV1>(
+  schema: TSchema | undefined,
+  value: unknown,
+  errorCode: GASForgeErrorCode,
+): Promise<StandardSchemaV1.InferOutput<TSchema>> {
+  if (!schema?.["~standard"]) {
+    return value;
+  }
   const result = await schema["~standard"].validate(value);
   if ("issues" in result && result.issues) {
     const err = new GASForgeError(
-      errorCode as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      "Validation failed: " + result.issues.map((i: any) => i.message).join(", "),
+      errorCode,
+      "Validation failed: " + result.issues.map((i) => i.message).join(", "),
       result.issues,
     );
     throw err;
@@ -70,8 +74,7 @@ export function createServerFn<
     | StandardSchemaV1.InferInput<TOutput>;
   __name?: string;
 }): ServerFn<TInput, TOutput> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fn = async (...args: any[]) => {
+  const fn = async (...args: unknown[]) => {
     // 1. Check if we are running in the browser client environment
     if (typeof google !== "undefined" && google?.script?.run && !def.handler) {
       const input = args[0];
@@ -96,36 +99,32 @@ export function createServerFn<
         }
 
         google.script.run
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .withSuccessHandler(async (raw: any) => {
+          .withSuccessHandler((raw: unknown) => {
             try {
-              const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+              const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, unknown> | null;
               if (parsed && typeof parsed === "object" && parsed.__gas_error) {
                 const err = new GASForgeError(
-                  parsed.code || "SERVER_ERROR",
-                  parsed.message || "Server Error",
+                  (parsed.code as GASForgeErrorCode | undefined) ?? "SERVER_ERROR",
+                  (parsed.message as string | undefined) ?? "Server Error",
                 );
-                err.stack = parsed.stack;
+                err.stack = parsed.stack as string | undefined;
                 reject(err);
                 return;
               }
-              const deserialized = superjson.deserialize(parsed);
-              resolve(
-                await __validate(
-                  def.output,
-                  deserialized,
-                  "OUTPUT_VALIDATION_FAILED",
-                ),
-              );
+              const deserialized = superjson.deserialize(parsed as unknown as Parameters<typeof superjson.deserialize>[0]);
+              __validate(
+                def.output,
+                deserialized,
+                "OUTPUT_VALIDATION_FAILED",
+              ).then(resolve, reject);
             } catch (err) {
-              reject(err);
+              reject(err instanceof Error ? err : new Error(String(err)));
             }
           })
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .withFailureHandler((err: any) => {
+          .withFailureHandler((err: Error) => {
             const rpcErr = new GASForgeError(
               "RPC_ERROR",
-              err?.message || String(err),
+              err.message || String(err),
             );
             reject(rpcErr);
           })[serverFnName](serializedInput);
@@ -143,7 +142,7 @@ export function createServerFn<
         typeof rawInput === "object" &&
         ("json" in rawInput || "meta" in rawInput)
       ) {
-        input = superjson.deserialize(rawInput);
+        input = superjson.deserialize(rawInput as Parameters<typeof superjson.deserialize>[0]);
       } else {
         input = rawInput;
       }
@@ -157,7 +156,7 @@ export function createServerFn<
       let ctx: Record<string, unknown> = {};
       if (def.middleware) {
         for (const mw of def.middleware) {
-          const nextCtx = await mw.handler(ctx);
+          const nextCtx = (await mw.handler(ctx)) as Record<string, unknown>;
           ctx = { ...ctx, ...nextCtx };
         }
       }
@@ -172,20 +171,22 @@ export function createServerFn<
         "OUTPUT_VALIDATION_FAILED",
       );
       return JSON.stringify(superjson.serialize(validatedOutput));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
+    } catch (err) {
+      const isObject = err && typeof err === "object";
+      const code = (isObject && "code" in err && typeof err.code === "string") ? (err.code as GASForgeErrorCode) : "SERVER_ERROR";
+      const message = (isObject && "message" in err && typeof err.message === "string") ? err.message : String(err);
+      const stack = (isObject && "stack" in err && typeof err.stack === "string") ? err.stack : undefined;
       const errorObj = {
         __gas_error: true,
-        code: err?.code || "SERVER_ERROR",
-        message: err?.message || String(err),
-        stack: err?.stack,
+        code,
+        message,
+        stack,
       };
       return JSON.stringify(errorObj);
     }
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fn.local = async (input: any) => {
+  fn.local = async (input: unknown) => {
     const validatedInput = await __validate(
       def.input,
       input,
@@ -195,7 +196,7 @@ export function createServerFn<
     let ctx: Record<string, unknown> = {};
     if (def.middleware) {
       for (const mw of def.middleware) {
-        const nextCtx = await mw.handler(ctx);
+        const nextCtx = (await mw.handler(ctx)) as Record<string, unknown>;
         ctx = { ...ctx, ...nextCtx };
       }
     }
@@ -214,12 +215,10 @@ export function createServerFn<
     return validatedOutput;
   };
 
-  const name = def.__name || "serverFn";
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fn.queryKey = (input: any) => [name, input];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fn.queryOptions = (input: any) => ({
-    queryKey: [name, input],
+  const name = def.__name ?? "serverFn";
+  fn.queryKey = (input: unknown) => [name, input] as const;
+  fn.queryOptions = (input: unknown) => ({
+    queryKey: [name, input] as const,
     queryFn: () => fn(input),
   });
 

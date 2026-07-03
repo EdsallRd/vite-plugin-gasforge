@@ -132,7 +132,6 @@ function parseImportFrom(code, start) {
     const inner = code.slice(i + 1, closeIdx);
     parseNamedBindings(inner, namedBindings);
     i = closeIdx + 1;
-    sawClause = true;
   } else if (code[i] === "*") {
     i++;
     skipWs();
@@ -143,7 +142,6 @@ function parseImportFrom(code, start) {
       if (!id) return null;
       namespaceName = id.name;
       i = id.end;
-      sawClause = true;
     } else {
       return null;
     }
@@ -152,7 +150,6 @@ function parseImportFrom(code, start) {
     if (!id) return null;
     defaultName = id.name;
     i = id.end;
-    sawClause = true;
     skipWs();
     if (code[i] === ",") {
       i++;
@@ -181,7 +178,6 @@ function parseImportFrom(code, start) {
       }
     }
   }
-  if (!sawClause) return null;
   skipWs();
   if (code.slice(i, i + 4) !== "from" || !/\s|["']/.test(code[i + 4] ?? "")) {
     return null;
@@ -692,7 +688,7 @@ function gas(options = {}) {
     config() {
       return {
         define: {
-          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "production")
+          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "production")
         },
         build: {
           target: "es2020",
@@ -877,12 +873,13 @@ if (typeof globalThis.URLSearchParams === "undefined") {
   };
 }
 async function __validate(schema, value, errorCode) {
-  if (!schema || !schema["~standard"]) return value;
+  if (!schema?.["~standard"]) {
+    return value;
+  }
   const result = await schema["~standard"].validate(value);
   if ("issues" in result && result.issues) {
     const err = new GASForgeError(
       errorCode,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       "Validation failed: " + result.issues.map((i) => i.message).join(", "),
       result.issues
     );
@@ -912,33 +909,31 @@ function createServerFn(def) {
           );
           return;
         }
-        google.script.run.withSuccessHandler(async (raw) => {
+        google.script.run.withSuccessHandler((raw) => {
           try {
             const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
             if (parsed && typeof parsed === "object" && parsed.__gas_error) {
               const err = new GASForgeError(
-                parsed.code || "SERVER_ERROR",
-                parsed.message || "Server Error"
+                parsed.code ?? "SERVER_ERROR",
+                parsed.message ?? "Server Error"
               );
               err.stack = parsed.stack;
               reject(err);
               return;
             }
             const deserialized = superjson.deserialize(parsed);
-            resolve4(
-              await __validate(
-                def.output,
-                deserialized,
-                "OUTPUT_VALIDATION_FAILED"
-              )
-            );
+            __validate(
+              def.output,
+              deserialized,
+              "OUTPUT_VALIDATION_FAILED"
+            ).then(resolve4, reject);
           } catch (err) {
-            reject(err);
+            reject(err instanceof Error ? err : new Error(String(err)));
           }
         }).withFailureHandler((err) => {
           const rpcErr = new GASForgeError(
             "RPC_ERROR",
-            err?.message || String(err)
+            err.message || String(err)
           );
           reject(rpcErr);
         })[serverFnName](serializedInput);
@@ -977,11 +972,15 @@ function createServerFn(def) {
       );
       return JSON.stringify(superjson.serialize(validatedOutput));
     } catch (err) {
+      const isObject = err && typeof err === "object";
+      const code = isObject && "code" in err && typeof err.code === "string" ? err.code : "SERVER_ERROR";
+      const message = isObject && "message" in err && typeof err.message === "string" ? err.message : String(err);
+      const stack = isObject && "stack" in err && typeof err.stack === "string" ? err.stack : void 0;
       const errorObj = {
         __gas_error: true,
-        code: err?.code || "SERVER_ERROR",
-        message: err?.message || String(err),
-        stack: err?.stack
+        code,
+        message,
+        stack
       };
       return JSON.stringify(errorObj);
     }
@@ -1010,7 +1009,7 @@ function createServerFn(def) {
     );
     return validatedOutput;
   };
-  const name = def.__name || "serverFn";
+  const name = def.__name ?? "serverFn";
   fn.queryKey = (input) => [name, input];
   fn.queryOptions = (input) => ({
     queryKey: [name, input],

@@ -48,6 +48,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       registry = buildRegistry(resolve(root, "src"));
 
       if (registry.length > 0) {
+        // eslint-disable-next-line no-console
         console.log(
           `vite-plugin-gasforge: ${registry.length} server function(s) — ${registry.map((f) => f.name).join(", ")}`,
         );
@@ -60,7 +61,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
     config() {
       return {
         define: {
-          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || "production"),
+          "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "production"),
         },
         build: {
           target: "es2020",
@@ -141,6 +142,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       ) {
         const code = readFileSync(id, "utf-8");
         if (code.includes("createServerFn")) {
+          // eslint-disable-next-line no-console
           console.log(
             "vite-plugin-gasforge: server function changed, re-scanning...",
           );
@@ -152,6 +154,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
 
     // Client build
     async closeBundle() {
+      // eslint-disable-next-line no-console
       console.log("vite-plugin-gasforge: building client bundle...");
 
       const clientDir = resolve(root, dirname(clientEntry));
@@ -167,7 +170,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
         ],
         root: clientDir,
         build: {
-          minify: resolvedConfig.define?.PRODUCTION ?? false,
+          minify: (resolvedConfig.define?.PRODUCTION as boolean | undefined) ?? false,
           outDir: distDir,
           write: false,
           assetsInlineLimit: 100000000,
