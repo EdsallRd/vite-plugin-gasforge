@@ -6,6 +6,7 @@ export default defineConfig({
     runtime: "src/runtime.ts",
   },
   format: "esm",
+  splitting: false,
   dts: true,
   clean: true,
   external: ["vite", "vite-plugin-singlefile", "@standard-schema/spec"],

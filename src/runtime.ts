@@ -1,10 +1,26 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import superjson from "superjson";
 import { GASForgeError } from "./errors";
+import type { Middleware, InferMiddlewareContext } from "./middleware";
+import type { ServerFnQueryExtensions } from "./query";
 
 // Re-export core types and helpers so runtime consumers have everything
 export { createMiddleware, type Middleware, type InferMiddlewareContext } from "./middleware";
 export { GASForgeError, type GASForgeErrorCode } from "./errors";
 export type { ServerFnQueryExtensions } from "./query";
+
+/**
+ * A callable server function with typed input/output and query helper extensions.
+ */
+export type ServerFn<
+  TInput extends StandardSchemaV1,
+  TOutput extends StandardSchemaV1,
+> = ((
+  ...args: StandardSchemaV1.InferInput<TInput> extends void
+    ? [input?: StandardSchemaV1.InferInput<TInput>]
+    : [input: StandardSchemaV1.InferInput<TInput>]
+) => Promise<StandardSchemaV1.InferOutput<TOutput>>) &
+  ServerFnQueryExtensions<TInput, TOutput>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function __validate(schema: any, value: any, errorCode: string): Promise<any> {
@@ -22,12 +38,30 @@ async function __validate(schema: any, value: any, errorCode: string): Promise<a
   return result.value;
 }
 
+/**
+ * Define a server function that can be called from client code.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createServerFn(def: any): any {
+export function createServerFn<
+  TInput extends StandardSchemaV1,
+  TOutput extends StandardSchemaV1,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TMiddlewares extends ReadonlyArray<Middleware<any>> = [],
+>(def: {
+  middleware?: TMiddlewares;
+  input: TInput;
+  output: TOutput;
+  handler: (
+    input: StandardSchemaV1.InferOutput<TInput>,
+    ctx: InferMiddlewareContext<TMiddlewares>,
+  ) =>
+    | Promise<StandardSchemaV1.InferInput<TOutput>>
+    | StandardSchemaV1.InferInput<TOutput>;
+  __name?: string;
+}): ServerFn<TInput, TOutput> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fn = async (...args: any[]) => {
     // 1. Check if we are running in the browser client environment
-    // Notice: on the client, def.handler was stripped by transformForClient
     if (typeof google !== "undefined" && google?.script?.run && !def.handler) {
       const input = args[0];
       const validated = await __validate(
@@ -72,7 +106,7 @@ export function createServerFn(def: any): any {
             );
             reject(rpcErr);
           })
-          [def.__name](serializedInput);
+          [def.__name!](serializedInput);
       });
     }
 
@@ -106,7 +140,10 @@ export function createServerFn(def: any): any {
         }
       }
 
-      const result = await def.handler(validatedInput, ctx);
+      const result = await def.handler(
+        validatedInput,
+        ctx as InferMiddlewareContext<TMiddlewares>,
+      );
       const validatedOutput = await __validate(
         def.output,
         result,
@@ -134,5 +171,5 @@ export function createServerFn(def: any): any {
     queryFn: () => fn(input),
   });
 
-  return fn;
+  return fn as unknown as ServerFn<TInput, TOutput>;
 }

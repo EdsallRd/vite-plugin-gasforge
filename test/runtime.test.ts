@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import superjson from "superjson";
 import { createServerFn, createMiddleware, GASForgeError } from "../src";
 
 describe("Runtime execution, middleware, and query extensions", () => {
@@ -23,7 +24,9 @@ describe("Runtime execution, middleware, and query extensions", () => {
       },
     });
 
-    const res = await getUserInfo(undefined);
+    const rawRes = await getUserInfo(undefined);
+    const parsed = typeof rawRes === "string" ? JSON.parse(rawRes) : rawRes;
+    const res = superjson.deserialize(parsed);
     expect(res).toEqual({ success: true, user: "user-123" });
   });
 

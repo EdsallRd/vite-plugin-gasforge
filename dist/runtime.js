@@ -1,10 +1,28 @@
-import {
-  GASForgeError,
-  createMiddleware
-} from "./chunk-NPYBMD4H.js";
-
 // src/runtime.ts
 import superjson from "superjson";
+
+// src/errors.ts
+var GASForgeError = class extends Error {
+  code;
+  issues;
+  constructor(code, message, issues) {
+    super(message);
+    this.name = "GASForgeError";
+    this.code = code;
+    this.issues = issues;
+  }
+};
+
+// src/middleware.ts
+function createMiddleware() {
+  return {
+    handler(fn) {
+      return { handler: fn };
+    }
+  };
+}
+
+// src/runtime.ts
 async function __validate(schema, value, errorCode) {
   if (!schema || !schema["~standard"]) return value;
   const result = await schema["~standard"].validate(value);
@@ -84,7 +102,10 @@ function createServerFn(def) {
           ctx = { ...ctx, ...nextCtx };
         }
       }
-      const result = await def.handler(validatedInput, ctx);
+      const result = await def.handler(
+        validatedInput,
+        ctx
+      );
       const validatedOutput = await __validate(
         def.output,
         result,
