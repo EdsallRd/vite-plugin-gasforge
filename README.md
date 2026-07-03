@@ -1,23 +1,35 @@
 # vite-plugin-gasforge
 
-A Vite plugin for building Google Apps Script projects with type-safe server functions. Write your server and client code in TypeScript, define RPC functions with [Standard Schema](https://github.com/standard-schema/standard-schema) validation, and let the plugin handle the rest.
+A Vite plugin for building Google Apps Script (GAS) projects with type-safe, validated RPC server functions. Write your server and client code in TypeScript, define validated functions using [Standard Schema](https://github.com/standard-schema/standard-schema), and let the plugin manage compilation, serialization, context injection, and tree-shaking.
 
-## How it works
+---
 
-GASForge splits your project into two build outputs:
+## Key Features
 
-- **Server.js** — An IIFE bundle for the Google Apps Script runtime. Server functions are extracted and exposed as top-level GAS functions.
-- **Client.html** — A single-file HTML bundle (via [vite-plugin-singlefile](https://github.com/nickreese/vite-plugin-singlefile)) served by HtmlService. Client calls to server functions are automatically transformed into `google.script.run` RPC calls.
+- **Type-Safe RPCs:** Call server-side GAS functions from client-side browser code with compile-time type safety.
+- **Standard Schema Validation:** Validate input parameters and output values using any Standard Schema v1 compatible library (Zod, Valibot, ArkType).
+- **Rich Serialization:** SuperJSON integration allows you to send JavaScript types like `Date`, `Map`, `Set`, `BigInt`, and `Uint8Array` directly over the RPC bridge.
+- **Middleware and Context API:** Inject execution context (such as active users, spreadsheet instances, or auth tokens) through composable middleware chains.
+- **TanStack Query Ready:** Every server function includes `.queryKey()` and `.queryOptions()` helper adapters for React Query or Vue Query compatibility.
+- **Structured Errors:** Errors thrown on the server are reconstructed into typed `GASForgeError` instances on the client, maintaining error codes and stack traces.
+
+---
 
 ## Installation
 
 ```bash
 pnpm add vite-plugin-gasforge vite vite-plugin-singlefile @standard-schema/spec
+# or
+npm install vite-plugin-gasforge vite vite-plugin-singlefile @standard-schema/spec
 ```
+
+---
 
 ## Setup
 
-### vite.config.ts
+### 1. `vite.config.ts`
+
+Add the plugin to your Vite configuration:
 
 ```ts
 import { defineConfig } from "vite";
@@ -28,32 +40,34 @@ export default defineConfig({
 });
 ```
 
-### Project structure
+### 2. Project Directory Structure
 
-```
+Organize your source code with folders for client and server entries:
+
+```text
 src/
   server/
     index.ts       # Server entry point
   client/
-    index.html     # Client entry point
+    index.html     # Client HTML entry point
 ```
 
-These paths are configurable via the plugin options:
+Customize these paths using plugin options:
 
 ```ts
 gas({
   server: "src/server/index.ts",
   client: {
     entry: "src/client/index.html",
-    plugins: [react()], // Additional Vite plugins for the client build
-    rollupOptions: {}, // Custom Rollup options for the client build
+    plugins: [], // Additional client-side plugins (e.g. react(), vue())
+    rollupOptions: {}, // Custom Rollup configuration for the client bundle
   },
 });
 ```
 
-### tsconfig.json
+### 3. `tsconfig.json`
 
-Add the type declarations to get `google.script` types and virtual module support:
+Include the type definitions to enable support for `google.script` globals and virtual modules:
 
 ```json
 {
@@ -63,9 +77,13 @@ Add the type declarations to get `google.script` types and virtual module suppor
 }
 ```
 
-## Defining server functions
+---
 
-Use `createServerFn` to define type-safe functions that are callable from both server and client code. Any [Standard Schema](https://github.com/standard-schema/standard-schema)-compatible library (Zod, Valibot, ArkType, etc.) can be used for validation.
+## Guide and API Reference
+
+### Defining Server Functions
+
+Use `createServerFn` to declare typed endpoints. In client builds, the `handler` implementation is automatically stripped out, while in server builds, the validation and handler logic are preserved.
 
 ```ts
 import { createServerFn } from "@edsallrd/vite-plugin-gasforge";
@@ -74,39 +92,136 @@ import { z } from "zod";
 export const getGreeting = createServerFn({
   input: z.string(),
   output: z.string(),
-  handler: (name) => `Hello, ${name}!`,
+  handler: async (name) => {
+    return `Hello, ${name}!`;
+  },
 });
 ```
 
-### What happens at build time
-
-- **Server build**: The function is kept as-is and exported as a top-level GAS function.
-- **Client build**: The `handler` is stripped out and replaced with a `google.script.run` call. Input and output are validated against the schemas on the client side.
-
-### Calling server functions
-
-Server functions are fully typed and can be called directly:
+Call the function directly from client-side code:
 
 ```ts
-const greeting = await getGreeting("World");
+const message = await getGreeting("World");
 // => "Hello, World!"
 ```
 
-On the client, this transparently calls `google.script.run.getGreeting(...)` under the hood.
+---
 
-## Server entry point
+### Rich Data Serialization
 
-Your server entry should re-export the virtual module `virtual:gas/server-fns`, which automatically collects all discovered `createServerFn` definitions:
+By incorporating SuperJSON into the RPC bridge, you can transmit rich data structures (such as `Date`, `Map`, and `Set`) without degrading them to strings or empty objects:
+
+```ts
+import { createServerFn } from "@edsallrd/vite-plugin-gasforge";
+import { z } from "zod";
+
+export const createTodo = createServerFn({
+  input: z.object({
+    title: z.string(),
+    tags: z.instanceof(Set),
+    dueDate: z.date(),
+  }),
+  output: z.object({
+    id: z.string(),
+    createdAt: z.date(),
+  }),
+  handler: async (todo) => {
+    return {
+      id: "todo-99",
+      createdAt: new Date(),
+    };
+  },
+});
+```
+
+---
+
+### Middleware and Context Injection
+
+Define composable middleware to populate execution context (such as verifying spreadsheet permissions or fetching user credentials) before invoking the main handler:
+
+```ts
+import {
+  createMiddleware,
+  createServerFn,
+} from "@edsallrd/vite-plugin-gasforge";
+import { z } from "zod";
+
+// 1. Define middleware and context outputs
+const authMiddleware = createMiddleware().handler(async () => {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) {
+    throw new Error("Unauthorized access");
+  }
+  return { userEmail: email };
+});
+
+// 2. Attach middleware to server functions
+export const getUserPreferences = createServerFn({
+  middleware: [authMiddleware],
+  input: z.void(),
+  output: z.any(),
+  handler: async (input, ctx) => {
+    // ctx is fully typed and contains userEmail:
+    console.log(`Access by: ${ctx.userEmail}`);
+    return { theme: "dark" };
+  },
+});
+```
+
+---
+
+### TanStack Query Adapters
+
+Every server function includes `.queryKey()` and `.queryOptions()` methods to integrate with `@tanstack/react-query` or `@tanstack/vue-query`:
+
+```ts
+import { useQuery } from "@tanstack/react-query";
+import { getGreeting } from "./functions";
+
+function GreetingComponent() {
+  const { data, isLoading } = useQuery(getGreeting.queryOptions("Alice"));
+
+  if (isLoading) return <div>Loading...</div>;
+  return <h1>{data}</h1>;
+}
+```
+
+---
+
+### Structured Error Handling
+
+All thrown errors are caught and reconstructed into `GASForgeError` instances, providing type-safe code categorizations:
+
+```ts
+import { GASForgeError } from "@edsallrd/vite-plugin-gasforge";
+import { getGreeting } from "./functions";
+
+try {
+  await getGreeting(123 as any); // Invalid type
+} catch (err) {
+  if (err instanceof GASForgeError) {
+    console.error(`Error Code: ${err.code}`); // e.g. "INPUT_VALIDATION_FAILED"
+    console.error(`Issues:`, err.issues); // Validation problems
+  }
+}
+```
+
+---
+
+## Server Entry Point
+
+Your Google Apps Script server-side code should export all discovered endpoints by importing the virtual compilation file:
 
 ```ts
 // src/server/index.ts
 export * from "virtual:gas/server-fns";
 
-// Add any other top-level GAS functions here
+// Add global triggers or HTML sidebar logic
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu("My App")
-    .addItem("Open", "showSidebar")
+    .createMenu("Sidebar Application")
+    .addItem("Open App", "showSidebar")
     .addToUi();
 }
 
@@ -116,25 +231,35 @@ function showSidebar() {
 }
 ```
 
-## Build
+---
+
+## Production Build
+
+Run the compilation script:
 
 ```bash
 pnpm vite build
+# or
+npm run build
 ```
 
-This produces:
+This triggers the dual-build pipeline and generates the following flat bundle files:
 
-```
+```text
 dist/
-  Server.js    # Deploy to Google Apps Script
-  Client.html  # Deploy to Google Apps Script
+  Server.js    # Deploy directly to Google Apps Script
+  Client.html  # Deploy directly to Google Apps Script
 ```
 
-## Plugin options
+---
 
-| Option                 | Type             | Default                   | Description                                  |
-| ---------------------- | ---------------- | ------------------------- | -------------------------------------------- |
-| `server`               | `string`         | `"src/server/index.ts"`   | Server entry file path                       |
-| `client.entry`         | `string`         | `"src/client/index.html"` | Client entry file path                       |
-| `client.plugins`       | `PluginOption[]` | `[]`                      | Additional Vite plugins for the client build |
-| `client.rollupOptions` | `object`         | `{}`                      | Rollup options for the client build          |
+## Plugin Options
+
+| Option                 | Type             | Default                   | Description                                   |
+| ---------------------- | ---------------- | ------------------------- | --------------------------------------------- |
+| `server`               | `string`         | `"src/server/index.ts"`   | File path of the server entry-point.          |
+| `client.entry`         | `string`         | `"src/client/index.html"` | File path of the client HTML entry-point.     |
+| `client.plugins`       | `PluginOption[]` | `[]`                      | Additional Vite plugins for the client build. |
+| `client.rollupOptions` | `object`         | `{}`                      | Custom Rollup build options for the client.   |
+
+---
