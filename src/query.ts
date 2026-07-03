@@ -8,6 +8,12 @@ export interface ServerFnQueryExtensions<
   TInput extends StandardSchemaV1,
   TOutput extends StandardSchemaV1,
 > {
+  local: (
+    ...args: StandardSchemaV1.InferInput<TInput> extends void
+      ? [input?: StandardSchemaV1.InferInput<TInput>]
+      : [input: StandardSchemaV1.InferInput<TInput>]
+  ) => Promise<StandardSchemaV1.InferOutput<TOutput>>;
+
   queryKey: (
     ...args: StandardSchemaV1.InferInput<TInput> extends void
       ? [input?: StandardSchemaV1.InferInput<TInput>]

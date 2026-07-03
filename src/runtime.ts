@@ -83,6 +83,18 @@ export function createServerFn<
       const serializedInput = superjson.stringify(validated);
 
       return new Promise((resolve, reject) => {
+        const serverFnName = def.__name!;
+        const serverFn = google.script.run[serverFnName];
+        if (typeof serverFn !== "function") {
+          reject(
+            new GASForgeError(
+              "RPC_ERROR",
+              `Server function "${serverFnName}" is not exported or defined on the Apps Script server. Make sure it is exported from your server entry point.`,
+            ),
+          );
+          return;
+        }
+
         google.script.run
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .withSuccessHandler(async (raw: any) => {
@@ -117,7 +129,7 @@ export function createServerFn<
             );
             reject(rpcErr);
           })
-          [def.__name!](serializedInput);
+          [serverFnName](serializedInput);
       });
     }
 
@@ -171,6 +183,36 @@ export function createServerFn<
       };
       return JSON.stringify(errorObj);
     }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fn.local = async (input: any) => {
+    const validatedInput = await __validate(
+      def.input,
+      input,
+      "INPUT_VALIDATION_FAILED",
+    );
+
+    let ctx: Record<string, unknown> = {};
+    if (def.middleware) {
+      for (const mw of def.middleware) {
+        const nextCtx = await mw.handler(ctx);
+        ctx = { ...ctx, ...nextCtx };
+      }
+    }
+
+    const result = await def.handler(
+      validatedInput,
+      ctx as InferMiddlewareContext<TMiddlewares>,
+    );
+
+    const validatedOutput = await __validate(
+      def.output,
+      result,
+      "OUTPUT_VALIDATION_FAILED",
+    );
+
+    return validatedOutput;
   };
 
   const name = def.__name || "serverFn";

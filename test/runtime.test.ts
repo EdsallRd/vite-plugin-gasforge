@@ -86,5 +86,73 @@ describe("Runtime execution, middleware, and query extensions", () => {
     const res = superjson.deserialize(parsed);
     expect(res).toBeUndefined();
   });
+
+  it("should execute .local bypassed call directly on the server without serialization", async () => {
+    const authMw = createMiddleware().handler(async () => {
+      return { userId: "user-123" };
+    });
+
+    const doubleFn = createServerFn({
+      middleware: [authMw],
+      input: {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: (val: any) => ({ value: val }),
+        },
+      } as any,
+      output: {
+        "~standard": {
+          version: 1,
+          vendor: "test",
+          validate: (val: any) => ({ value: val }),
+        },
+      } as any,
+      handler: async (num: number, ctx) => {
+        expect(ctx.userId).toBe("user-123");
+        return num * 2;
+      },
+    });
+
+    const res = await doubleFn.local(21);
+    expect(res).toBe(42);
+  });
+
+  it("should throw GASForgeError when target function is missing on google.script.run", async () => {
+    const defObj: any = {
+      __name: "missingFunction",
+      input: {} as any,
+      output: {} as any,
+      handler: async () => "result",
+    };
+    const testFn = createServerFn(defObj);
+
+    // Simulate client-side transform by deleting handler from definition object
+    delete defObj.handler;
+
+    // Mock google global environment
+    const originalGoogle = (globalThis as any).google;
+    (globalThis as any).google = {
+      script: {
+        run: {
+          withSuccessHandler() {
+            return this;
+          },
+          withFailureHandler() {
+            return this;
+          },
+        },
+      },
+    };
+
+    try {
+      await expect(testFn(undefined)).rejects.toThrowError(
+        'Server function "missingFunction" is not exported or defined on the Apps Script server.',
+      );
+    } finally {
+      // Restore
+      (globalThis as any).google = originalGoogle;
+    }
+  });
 });
 

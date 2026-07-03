@@ -42,8 +42,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "acorn": "^8.17.0",
-    "magic-string": "^0.30.21",
     "superjson": "^2.2.6"
   }
 }
