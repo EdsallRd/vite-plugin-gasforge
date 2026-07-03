@@ -4,6 +4,17 @@ import { GASForgeError } from "./errors";
 import type { Middleware, InferMiddlewareContext } from "./middleware";
 import type { ServerFnQueryExtensions } from "./query";
 
+// Google Apps Script V8 runtime does not define URL or URLSearchParams globals.
+// SuperJSON checks `payload instanceof URL`, which throws ReferenceError if URL is undefined.
+if (typeof globalThis.URL === "undefined") {
+  // @ts-expect-error GAS runtime polyfill
+  globalThis.URL = class URL {};
+}
+if (typeof globalThis.URLSearchParams === "undefined") {
+  // @ts-expect-error GAS runtime polyfill
+  globalThis.URLSearchParams = class URLSearchParams {};
+}
+
 // Re-export core types and helpers so runtime consumers have everything
 export { createMiddleware, type Middleware, type InferMiddlewareContext } from "./middleware";
 export { GASForgeError, type GASForgeErrorCode } from "./errors";

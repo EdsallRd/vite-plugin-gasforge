@@ -74,6 +74,7 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
             output: {
               entryFileNames: "Server.js",
               extend: true,
+              banner: `if (typeof globalThis.URL === "undefined") globalThis.URL = class URL {};\nif (typeof globalThis.URLSearchParams === "undefined") globalThis.URLSearchParams = class URLSearchParams {};`,
               footer: (chunk: { exports: string[] }) => {
                 return chunk.exports
                   .map((fn) => `function ${fn}() {};`)

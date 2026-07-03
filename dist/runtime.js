@@ -23,6 +23,14 @@ function createMiddleware() {
 }
 
 // src/runtime.ts
+if (typeof globalThis.URL === "undefined") {
+  globalThis.URL = class URL {
+  };
+}
+if (typeof globalThis.URLSearchParams === "undefined") {
+  globalThis.URLSearchParams = class URLSearchParams {
+  };
+}
 async function __validate(schema, value, errorCode) {
   if (!schema || !schema["~standard"]) return value;
   const result = await schema["~standard"].validate(value);
