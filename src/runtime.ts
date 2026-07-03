@@ -35,7 +35,7 @@ export type ServerFn<
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function __validate(schema: any, value: any, errorCode: string): Promise<any> {
-  if (!schema || !schema["~standard"]) return value;
+  if (!schema?.["~standard"]) return value;
   const result = await schema["~standard"].validate(value);
   if ("issues" in result && result.issues) {
     const err = new GASForgeError(
@@ -52,12 +52,12 @@ async function __validate(schema: any, value: any, errorCode: string): Promise<a
 /**
  * Define a server function that can be called from client code.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function createServerFn<
   TInput extends StandardSchemaV1,
   TOutput extends StandardSchemaV1,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  TMiddlewares extends ReadonlyArray<Middleware<any>> = [],
+  TMiddlewares extends readonly Middleware<any>[] = [],
 >(def: {
   middleware?: TMiddlewares;
   input: TInput;
@@ -128,8 +128,7 @@ export function createServerFn<
               err?.message || String(err),
             );
             reject(rpcErr);
-          })
-          [serverFnName](serializedInput);
+          })[serverFnName](serializedInput);
       });
     }
 
@@ -144,7 +143,7 @@ export function createServerFn<
         typeof rawInput === "object" &&
         ("json" in rawInput || "meta" in rawInput)
       ) {
-        input = superjson.deserialize(rawInput as any);
+        input = superjson.deserialize(rawInput);
       } else {
         input = rawInput;
       }

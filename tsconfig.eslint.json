@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "test",
+    "tsup.config.ts",
+    "google.script.d.ts",
+    "virtual.d.ts"
+  ]
+}

@@ -1,9 +1,7 @@
 import { resolve, dirname, relative } from "path";
 import { readFileSync, writeFileSync } from "fs";
 import { writeFile } from "fs/promises";
-import { createRequire } from "module";
 
-const require = createRequire(import.meta.url);
 import {
   build,
   defineConfig,
@@ -188,12 +186,12 @@ export default function gas(options: GASPluginOptions = {}): Plugin {
       const buildOutput = await build(clientConfig);
       // Find the HTML asset in the build output
       // @ts-expect-error - output is an array of RollupOutput
-      const outputs = buildOutput.output as Array<{
+      const outputs = buildOutput.output as {
         type: string;
         fileName: string;
         source?: string;
         code?: string;
-      }>;
+      }[];
       const html = outputs.find(
         (o) => o.type === "asset" && o.fileName.endsWith(".html"),
       );

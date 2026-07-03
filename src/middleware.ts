@@ -10,7 +10,7 @@ export interface Middleware<TNextCtx = any> {
  * Helper type to infer the combined context produced by an array of middlewares.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type InferMiddlewareContext<TMiddlewares extends ReadonlyArray<Middleware<any>>> =
+export type InferMiddlewareContext<TMiddlewares extends readonly Middleware<any>[]> =
   TMiddlewares extends readonly [Middleware<infer C1>, ...infer Rest]
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ? Rest extends readonly Middleware<any>[]

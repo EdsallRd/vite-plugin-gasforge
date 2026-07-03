@@ -9,12 +9,12 @@ export type GASForgeErrorCode =
 
 export class GASForgeError extends Error {
   public readonly code: GASForgeErrorCode;
-  public readonly issues?: ReadonlyArray<StandardSchemaV1.Issue>;
+  public readonly issues?: readonly StandardSchemaV1.Issue[];
 
   constructor(
     code: GASForgeErrorCode,
     message: string,
-    issues?: ReadonlyArray<StandardSchemaV1.Issue>,
+    issues?: readonly StandardSchemaV1.Issue[],
   ) {
     super(message);
     this.name = "GASForgeError";

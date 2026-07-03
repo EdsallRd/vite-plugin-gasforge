@@ -2,7 +2,6 @@
 import { resolve as resolve3, dirname as dirname2, relative } from "path";
 import { readFileSync as readFileSync2, writeFileSync } from "fs";
 import { writeFile } from "fs/promises";
-import { createRequire as createRequire2 } from "module";
 import {
   build,
   defineConfig
@@ -87,7 +86,6 @@ function parseImportFrom(code, start) {
   let defaultName;
   let namespaceName;
   const namedBindings = [];
-  let sawClause = false;
   const skipWs = () => {
     while (i < len) {
       const ch = code[i];
@@ -598,11 +596,14 @@ var package_default = {
     "vite-plugin-singlefile": ">=2.0.0"
   },
   devDependencies: {
+    "@eslint/js": "^10.0.1",
     "@standard-schema/spec": "^1.1.0",
     "@types/acorn": "^4.0.6",
     "@types/node": "^26.1.0",
+    eslint: "^10.6.0",
     tsup: "^8.5.1",
     typescript: "^6.0.3",
+    "typescript-eslint": "^8.62.1",
     vite: "^8.1.3",
     "vite-plugin-singlefile": "^2.3.0",
     vitest: "^4.1.9"
@@ -610,7 +611,9 @@ var package_default = {
   scripts: {
     build: "tsup",
     dev: "tsup --watch",
-    test: "vitest run"
+    test: "vitest run",
+    lint: "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   dependencies: {
     superjson: "^2.2.6"
@@ -663,7 +666,6 @@ function gasClientPlugin() {
 }
 
 // src/plugin/index.ts
-var require3 = createRequire2(import.meta.url);
 function gas(options = {}) {
   const serverEntry = options.server ?? "src/server/index.ts";
   const clientEntry = options.client?.entry ?? "src/client/index.html";

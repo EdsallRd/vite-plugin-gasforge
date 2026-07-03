@@ -146,7 +146,7 @@ describe("Runtime execution, middleware, and query extensions", () => {
     };
 
     try {
-      await expect(testFn(undefined)).rejects.toThrowError(
+      await expect(testFn(undefined)).rejects.toThrow(
         'Server function "missingFunction" is not exported or defined on the Apps Script server.',
       );
     } finally {
